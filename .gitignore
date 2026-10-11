@@ -5,3 +5,6 @@ __pycache__/
 1simulated_register_data/
 2processed_data/
 3estimation/
+
+# The study paper itself is not redistributed here.
+article/*.pdf
