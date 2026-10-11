@@ -3,6 +3,8 @@
 A synthetic rebuild, for Denmark, of the data pipeline behind Marynissen,
 Wood, Fallesen, Mikolai, Hellstrand & Bergsvik (2026), *His and/or hers?*
 (ROCKWOOL Foundation Study Paper 298).
+The study is published at
+<https://rockwoolfonden.dk/udgivelser/his-and-or-hers-a-cross-national-perspective-on-the-gendered-nature-of-couples-employment-preconditions-for-parenthood/>.
 
 The real study used restricted registers. Each country team built couple-year
 files internally and shared only collapsed count tables. This project
