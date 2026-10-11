@@ -17,7 +17,7 @@ from patsy import dmatrix
 
 import stage1_simulate_registers
 from common import (AGE_GROUPS, CONSTELLATION_LABELS, CONSTELLATIONS, EDUCATION_LEVELS,
-                    EVENT_TABLE_FILE, HOUSEHOLD_WAGE_TERCILES, OUTPUT_FOLDER)
+                    ESTIMATION_FOLDER, EVENT_TABLE_FILE, HOUSEHOLD_WAGE_TERCILES)
 
 # The paper's Model 2 (eq. 1 plus controls): the woman's age group, the
 # couple's constellation, household-wage tercile, her education and foreign
@@ -107,14 +107,15 @@ def plot_constellation_odds_ratios(odds_ratios, figure_file):
 def analyse():
     cells = load_cells()
     odds_ratios = estimate_odds_ratios(cells)
-    odds_ratios.to_csv(OUTPUT_FOLDER / "4_odds_ratios.csv", index=False)
-    plot_constellation_odds_ratios(odds_ratios, OUTPUT_FOLDER / "4_fig_odds_ratios.png")
+    ESTIMATION_FOLDER.mkdir(exist_ok=True)
+    odds_ratios.to_csv(ESTIMATION_FOLDER / "odds_ratios.csv", index=False)
+    plot_constellation_odds_ratios(odds_ratios, ESTIMATION_FOLDER / "fig_odds_ratios.png")
 
     pd.set_option("display.width", 200)
     print(odds_ratios.round(3).to_string(index=False))
     print(f"  the paper's value is inside the 95% interval for "
           f"{odds_ratios.paper_within_interval.sum()} of {len(odds_ratios)} estimates")
-    print(f"  outputs: {OUTPUT_FOLDER}/4_*")
+    print(f"  results: {ESTIMATION_FOLDER}/")
 
 
 if __name__ == "__main__":

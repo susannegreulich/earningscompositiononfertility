@@ -6,7 +6,7 @@ received from each country team. Uses ONLY the stage 2 file.
 """
 import pandas as pd
 
-from common import COUPLE_YEAR_FILE, EVENT_TABLE_FILE
+from common import COUPLE_YEAR_FILE, EVENT_TABLE_FILE, PROCESSED_DATA_FOLDER
 
 # =============================================================================
 # PARAMETERS
@@ -38,6 +38,7 @@ def aggregate():
     suppressed_cells = cells[too_small]
     cells = cells[~too_small]
 
+    PROCESSED_DATA_FOLDER.mkdir(exist_ok=True)
     cells.to_csv(EVENT_TABLE_FILE, index=False)
     print(f"  {EVENT_TABLE_FILE.name}: {len(cells)} cells "
           f"(of max 576; {len(suppressed_cells)} suppressed, "

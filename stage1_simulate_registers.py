@@ -22,8 +22,8 @@ file are the paper's odds ratios and one assumption, P_KEEP_LAST_YEARS_POSITION.
 import numpy as np
 import pandas as pd
 
-from common import (DST_DATA_FOLDER, OUTPUT_FOLDER, REGISTER_FILES, age_group, constellation,
-                    wage_tercile)
+from common import (DST_DATA_FOLDER, REGISTER_FILES, SIMULATED_REGISTER_FOLDER, age_group,
+                    constellation, wage_tercile)
 from stage0_download_dst_data import PARTNER_AGE_GAP_MEAN_AND_SD
 
 # =============================================================================
@@ -295,7 +295,7 @@ def simulate():
                           man_wage[partnered], man_enrolled[partnered], man_high_education[partnered],
                           man_education_unknown[partnered])
 
-    OUTPUT_FOLDER.mkdir(exist_ok=True)
+    SIMULATED_REGISTER_FOLDER.mkdir(exist_ok=True)
     for name, yearly_chunks in register_rows.items():
         register = pd.concat(yearly_chunks, ignore_index=True)
         register.to_csv(REGISTER_FILES[name], index=False)

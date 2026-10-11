@@ -2,14 +2,15 @@
 STAGE 2 - Build the couple-year file from the raw registers: one row per
 couple per calendar year in which the woman is at risk of a first birth.
 
-Uses ONLY the stage 1 register files, as a researcher at Statistics Denmark
+Uses ONLY the stage 1 register files in simulated_register_data/, as a researcher at Statistics Denmark
 would, and follows the paper's sample rules. Every register row describes a
 person's situation at the END of the calendar year.
 """
 import numpy as np
 import pandas as pd
 
-from common import COUPLE_YEAR_FILE, REGISTER_FILES, age_group, constellation, wage_tercile
+from common import (COUPLE_YEAR_FILE, PROCESSED_DATA_FOLDER, REGISTER_FILES, age_group,
+                    constellation, wage_tercile)
 
 # =============================================================================
 # PARAMETERS - sample definition (paper: Denmark 2010-2019, women 18-45)
@@ -105,6 +106,7 @@ def build():
         "household_wage", "household_wage_tercile", "woman_education",
         "either_partner_foreign", "conceived_first_child_that_year"]]
     couple_years = couple_years.sort_values(["woman_id", "year"]).reset_index(drop=True)
+    PROCESSED_DATA_FOLDER.mkdir(exist_ok=True)
     couple_years.to_csv(COUPLE_YEAR_FILE, index=False)
 
     number_of_couples = len(couple_years[["woman_id", "man_id"]].drop_duplicates())

@@ -4,17 +4,19 @@ from pathlib import Path
 
 import numpy as np
 
-# Stages 1 to 4 write into one folder; the number at the start of a file name
-# is the stage that wrote it.
-OUTPUT_FOLDER = Path(__file__).parent / "output"
-# Figures downloaded from Statistics Denmark by stage0_download_dst_data.py.
-DST_DATA_FOLDER = Path(__file__).parent / "dst_data"
+# One folder per kind of data, in the order the pipeline produces them.
+PROJECT_FOLDER = Path(__file__).parent
+DST_DATA_FOLDER = PROJECT_FOLDER / "dst_data"                        # stage 0: Statistics Denmark figures
+SIMULATED_REGISTER_FOLDER = PROJECT_FOLDER / "simulated_register_data"   # stage 1: simulated registers
+PROCESSED_DATA_FOLDER = PROJECT_FOLDER / "processed_data"            # stages 2 and 3: couple-years, counts
+ESTIMATION_FOLDER = PROJECT_FOLDER / "estimation"                    # stage 4: estimation results
+
 # The five simulated registers, named after the Danish registers they imitate:
 # bef = population, ras = employment, ind = income, udda = education, fod = births.
-REGISTER_FILES = {name: OUTPUT_FOLDER / f"1_simulated_register_{name}.csv"
+REGISTER_FILES = {name: SIMULATED_REGISTER_FOLDER / f"{name}.csv"
                   for name in ("bef", "ras", "ind", "udda", "fod")}
-COUPLE_YEAR_FILE = OUTPUT_FOLDER / "2_couple_years.csv"
-EVENT_TABLE_FILE = OUTPUT_FOLDER / "3_event_occurrence_table.csv"
+COUPLE_YEAR_FILE = PROCESSED_DATA_FOLDER / "couple_years.csv"
+EVENT_TABLE_FILE = PROCESSED_DATA_FOLDER / "event_occurrence_table.csv"
 
 # Category lists. The first entry of each is the reference category in the model.
 AGE_GROUPS = ["18-25", "26-30", "31-35", "36-45"]

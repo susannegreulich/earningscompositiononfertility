@@ -11,15 +11,15 @@ simulates all three data levels, so each one can be inspected and changed.
 ## The logic
 
 ```
-stage 0  download Statistics Denmark figures dst_data/*.csv
+stage 0  download Statistics Denmark figures   dst_data/
    │
-stage 1  simulate person-level registers    output/1_simulated_register_*.csv
+stage 1  simulate person-level registers       simulated_register_data/
    │
-stage 2  build the couple-year file         output/2_couple_years.csv
+stage 2  build the couple-year file            processed_data/couple_years.csv
    │
-stage 3  collapse to a count table          output/3_event_occurrence_table.csv
+stage 3  collapse to a count table             processed_data/event_occurrence_table.csv
    │
-stage 4  fit the paper's model              output/4_*
+stage 4  fit the paper's model                 estimation/
 ```
 
 0. **Download.** Fetch every Statistics Denmark figure the simulation needs
@@ -54,6 +54,8 @@ stage 4  fit the paper's model              output/4_*
 
 Each stage reads only the output of the stage before it: stage 1 reads
 `dst_data/`, stage 2 the registers, stage 3 the couple-years, stage 4 the counts.
+The last three folders are created by running the pipeline and are not kept
+in the repository.
 
 **Why this is useful:** the odds ratios that generate the births in stage 1
 are known, so stage 4 can be checked against them. If stages 2 to 4 are coded
@@ -85,6 +87,9 @@ python run_all.py 0        # download the Statistics Denmark figures again
 | `stage4_analyse.py` | the model and the comparison of odds ratios with Table A2 |
 | `common.py` | file locations, category lists, the classification rules |
 | `dst_data/` | the three tables of Statistics Denmark figures that stage 1 draws from |
+| `simulated_register_data/` | the five simulated registers: `bef`, `ras`, `ind`, `udda`, `fod` |
+| `processed_data/` | the couple-year file and the count table |
+| `estimation/` | the odds ratios next to Table A2, as a table and a figure |
 
 To change a setting, edit the constants at the top of the stage file and rerun.
 To change a Statistics Denmark figure, edit the table in `dst_data/`.
