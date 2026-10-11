@@ -54,8 +54,9 @@ stage 3  fit the paper's model                 3estimation/
 
 Each stage reads only the output of the stage before it: stage 1 reads
 `0data/`, stage 2 the registers, stage 3 the counts.
-The last three folders are created by running the pipeline and are not kept
-in the repository.
+All four folders are kept in the repository, so the registers, the couple-years
+and the results can be inspected without running anything; running the
+pipeline rewrites them.
 
 **Why this is useful:** the odds ratios that generate the births in stage 1
 are known (the simulation of birth expressedly used the paper's parameter estimates), 
