@@ -1,14 +1,19 @@
 """
 STAGE 0 - Download every Statistics Denmark figure that stage 1 draws from, and
-save them as three small tables in dst_data/. Nothing here is simulated: these
-are published counts and rates. The tables are kept in the repository, so this
-stage only needs to run again to refresh them.
+save them as three small tables in 0dst_data/, with a chart of each figure as a
+visual check. Nothing here is simulated: these are published counts and rates.
+The tables are kept in the repository, so this stage only needs to run again
+to refresh them.
 
 Source: StatBank (statistikbanken.dk) through its public API, no login needed.
 Every download below is preceded by a comment naming the StatBank table, which
 can be opened at statistikbanken.dk/<table name>.
 
-Tables used, and the file each ends up in:
+It also holds the paper's Table A2 (Model 2), typed in, and turns it into a
+table of Danish odds ratios: paper_table_a2_model2_denmark.csv. See the section
+"THE PAPER'S TABLE A2" below for how the Danish numbers are computed.
+
+Statistics Denmark tables used, and the file each ends up in:
   women_2010.csv              FOLK1E, BARNLOS, FAM100N
   immigrant_share_2010.csv    FOLK1E
   yearly_rates.csv            RAS200, HFUDD11, INDKP111, LONS50, UDDAKT10, FOLK1E
@@ -17,8 +22,12 @@ import io
 import json
 import urllib.request
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import FuncFormatter
 
 from common import DST_DATA_FOLDER
 
@@ -35,6 +44,109 @@ SEX_NAMES = {"K": "F", "2": "F", "M": "M", "1": "M"}     # StatBank's codes -> F
 # Sd 5.1: spread of (his age - her age) over all marriages in 2010 with a bride
 #   aged 18-46, TABLE VIE825 "Marriages".
 PARTNER_AGE_GAP_MEAN_AND_SD = (2.3, 5.1)
+
+
+# =============================================================================
+# THE PAPER'S TABLE A2, MODEL 2 - turned into a table for Denmark only
+# =============================================================================
+# Table A2 pools five countries and uses NORWAY as the reference country, so it
+# never prints a Danish odds ratio. For each trait it prints two rows:
+#
+#   main row         e.g. "Jobless couple"            0.670
+#       The odds ratio in Norway: the odds of conceiving for a jobless couple
+#       relative to a dual equal-earner couple, both in Norway.
+#   Denmark row      e.g. "Denmark * Jobless couple"  1.132
+#       A ratio of two odds ratios: how many times larger the Danish odds ratio
+#       is than the Norwegian one. It is NOT "Danish jobless couples compared
+#       with Norwegian jobless couples".
+#
+# The Danish odds ratio is their product:
+#
+#   Danish odds ratio = main row x Denmark row = 0.670 x 1.132 = 0.758
+#
+#   i.e. in Denmark a jobless couple has 0.758 times the odds of conceiving of
+#   a Danish dual equal-earner couple that is the same on every other variable.
+#
+# The baseline works the same way. "Constant" (0.133) is the odds of conceiving
+# for the reference couple in Norway, and the "Denmark" country row (0.581)
+# rescales it:
+#
+#   Danish baseline odds = Constant x Denmark = 0.133 x 0.581 = 0.0773
+#
+# The reference couple is in the first category of every variable below: woman
+# aged 18-25, dual equal earners, household wages in the low tercile, low
+# education, neither partner born abroad.
+#
+# Below, the Model 2 columns of Table A2 are typed in as
+#   (variable, category, label in the paper, main row, Denmark row).
+# A reference category has no row in the paper; it is written with 1.0 and 1.0.
+# The woman's age has no "Denmark * age" row, so its Denmark row is also 1.0.
+TABLE_A2_CONSTANT = 0.133
+TABLE_A2_DENMARK = 0.581
+TABLE_A2_MODEL_2 = [
+    ("woman_age_group", "18-25", "Age female partner 18-25 (reference)", 1.0, 1.0),
+    ("woman_age_group", "26-30", "Age female partner 26-30", 1.324, 1.0),
+    ("woman_age_group", "31-35", "Age female partner 31-35", 1.219, 1.0),
+    ("woman_age_group", "36-45", "Age female partner 36-45", 0.281, 1.0),
+    ("earner_constellation", "dual_equal_earners", "Dual breadwinner, equal earners (reference)", 1.0, 1.0),
+    ("earner_constellation", "both_jobless", "Jobless couple", 0.670, 1.132),
+    ("earner_constellation", "male_works", "Male breadwinner", 0.951, 0.936),
+    ("earner_constellation", "female_works", "Female breadwinner", 0.799, 1.041),
+    ("earner_constellation", "dual_male_main_earner", "Dual breadwinner, male main earner", 0.864, 0.919),
+    ("earner_constellation", "dual_female_main_earner", "Dual breadwinner, female main earner", 0.921, 1.107),
+    ("household_wage_tercile", "low", "Household wages low (reference)", 1.0, 1.0),
+    ("household_wage_tercile", "middle", "Household wages middle", 1.349, 1.277),
+    ("household_wage_tercile", "high", "Household wages high", 1.890, 1.341),
+    ("woman_education", "low", "Education female partner low (reference)", 1.0, 1.0),
+    ("woman_education", "enrolled", "Enrolled in education", 0.542, 1.470),
+    ("woman_education", "high", "Education female partner high", 1.197, 1.141),
+    ("woman_education", "unknown", "Education female partner unknown", 1.113, 0.897),
+    ("either_partner_foreign", 0, "Neither partner born abroad (reference)", 1.0, 1.0),
+    ("either_partner_foreign", 1, "Foreign country of birth (either partner)", 1.010, 0.840),
+]
+
+# The Danish numbers, as stage 1 (to generate births) and stage 3 (to check
+# the estimates) use them.
+DANISH_BASELINE_ODDS = TABLE_A2_CONSTANT * TABLE_A2_DENMARK
+DANISH_ODDS_RATIOS = {}
+for _variable, _category, _label, _main_row, _denmark_row in TABLE_A2_MODEL_2:
+    DANISH_ODDS_RATIOS.setdefault(_variable, {})[_category] = _main_row * _denmark_row
+
+
+def danish_table_a2():
+    """Table A2, Model 2, with the Norwegian reference folded in: one row per
+    category, giving the Danish odds ratio and what it means as a probability."""
+    # From odds to probability:  probability = odds / (1 + odds).
+    # The Danish reference couple: 0.0773 / 1.0773 = 7.2% per year.
+    def probability(odds):
+        return odds / (1 + odds)
+
+    rows = [{"variable": "baseline", "category": "", "label_in_paper": "Constant x Denmark",
+             "compared_with": "(not a ratio: the odds of the Danish reference couple)",
+             "danish_odds_ratio": round(DANISH_BASELINE_ODDS, 4),
+             "yearly_probability_for_reference_couple": round(probability(DANISH_BASELINE_ODDS), 4)}]
+    for variable, category, label, _, _ in TABLE_A2_MODEL_2:
+        odds_ratio = DANISH_ODDS_RATIOS[variable][category]
+        reference_label = next(label for v, _, label, _, _ in TABLE_A2_MODEL_2 if v == variable)
+        # An odds ratio has no single probability equivalent: the same ratio
+        # changes the probability more for a couple that starts from a higher
+        # one. So the probability shown is for ONE fixed couple: the Danish
+        # reference couple with only this trait changed.
+        #   its odds        = Danish baseline odds x Danish odds ratio
+        #   its probability = odds / (1 + odds)
+        # e.g. jobless: 0.0773 x 0.758 = 0.0586 -> 5.5%, against 7.2% for equal earners.
+        rows.append({"variable": variable, "category": category, "label_in_paper": label,
+                     "compared_with": reference_label.replace(" (reference)", ""),
+                     "danish_odds_ratio": round(odds_ratio, 3),
+                     "yearly_probability_for_reference_couple":
+                         round(probability(DANISH_BASELINE_ODDS * odds_ratio), 4)})
+    return pd.DataFrame(rows)
+
+
+def save_danish_table_a2():
+    """Write the Danish table to the data folder. Needs no download."""
+    DST_DATA_FOLDER.mkdir(exist_ok=True)
+    danish_table_a2().to_csv(DST_DATA_FOLDER / "paper_table_a2_model2_denmark.csv", index=False)
 
 
 def download(table, **selection):
@@ -225,14 +337,105 @@ def yearly_rates():
     return rates.sort_values(["year", "sex", "age"])
 
 
+# ---- charts: a visual check of what was downloaded ------------------------------
+# Each chart is saved in the data folder under the name of the StatBank table(s)
+# its figures come from, so it can be compared with the table on statistikbanken.dk.
+WOMEN_COLOUR, SECOND_COLOUR = "#2a78d6", "#eb6834"
+# One shade of blue per year, light (first year) to dark (last year).
+YEAR_COLOURS = ["#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5",
+                "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281"]
+AS_PERCENT = FuncFormatter(lambda value, _: f"{value:.0%}")
+AS_NUMBER = FuncFormatter(lambda value, _: f"{value:,.0f}")
+
+
+def style(axis, title, x_label, y_format):
+    """The look shared by every chart: left-aligned title, light horizontal grid,
+    no top or right border, y axis starting at zero."""
+    axis.set_title(title, fontsize=10, loc="left", color="#0b0b0b")
+    axis.set_xlabel(x_label, fontsize=9, color="#52514e")
+    axis.yaxis.set_major_formatter(y_format)
+    axis.set_ylim(bottom=0)
+    axis.grid(axis="y", color="#e1e0d9", lw=0.6, zorder=0)
+    for side in ("top", "right"):
+        axis.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        axis.spines[side].set_color("#c3c2b7")
+    axis.tick_params(colors="#52514e", labelsize=8.5)
+
+
+def chart_two_lines(file_name, title, x_label, y_format, x, first, second):
+    """One chart with two lines. `first` and `second` are (label, values)."""
+    figure, axis = plt.subplots(figsize=(8, 4.2), dpi=130)
+    for (label, values), colour in ((first, WOMEN_COLOUR), (second, SECOND_COLOUR)):
+        axis.plot(x, values, color=colour, lw=2, label=label, zorder=2)
+    style(axis, title, x_label, y_format)
+    axis.legend(frameon=False, fontsize=8.5)
+    figure.tight_layout()
+    figure.savefig(DST_DATA_FOLDER / file_name)
+    plt.close(figure)
+
+
+def chart_by_year(file_name, title, y_format, rates, column):
+    """One panel for women and one for men; in each, one line per year by age."""
+    figure, axes = plt.subplots(1, 2, figsize=(11, 4.2), dpi=130, sharey=True)
+    years = sorted(rates.year.unique())
+    for axis, (sex, sex_label) in zip(axes, (("F", "Women"), ("M", "Men"))):
+        for year, colour in zip(years, YEAR_COLOURS):
+            one_year = rates[(rates.sex == sex) & (rates.year == year)]
+            # Drawn as steps: most tables are by age group, so the figure is flat within a group.
+            axis.step(one_year.age, one_year[column], where="mid", color=colour, lw=1.5, zorder=2,
+                      label=year if year in (years[0], years[-1]) else None)
+        style(axis, f"{title} - {sex_label}", "Age", y_format)
+    axes[0].legend(frameon=False, fontsize=8.5, title="One line per year", title_fontsize=8.5)
+    figure.tight_layout()
+    figure.savefig(DST_DATA_FOLDER / file_name)
+    plt.close(figure)
+
+
+def save_charts(women, immigrants, rates):
+    """Draw every downloaded figure. File names start with the StatBank table name."""
+    chart_two_lines("FOLK1E_BARNLOS_women_by_age_2010.png",
+                    "Women on 1 January 2010, by age (FOLK1E; childless = FOLK1E x BARNLOS)",
+                    "Age on 1 January 2010", AS_NUMBER, women.age_on_1_january,
+                    ("All women", women.all_women), ("Childless women", women.childless_women))
+    chart_two_lines("FAM100N_share_living_with_partner_2010.png",
+                    "Share of women living with a partner, 1 January 2010 (FAM100N)",
+                    "Age on 1 January 2010", AS_PERCENT, women.age_on_1_january,
+                    ("All women", women.share_of_all_women_living_with_partner),
+                    ("Childless women", women.share_of_childless_women_living_with_partner))
+    by_sex = immigrants.pivot(index="age", columns="sex", values="share_immigrant")
+    chart_two_lines("FOLK1E_share_immigrant_2010.png",
+                    "Share of immigrants, 1 January 2010 (FOLK1E)",
+                    "Age on 1 January 2010", AS_PERCENT, by_sex.index,
+                    ("Women", by_sex["F"]), ("Men", by_sex["M"]))
+    for file_name, title, y_format, column in (
+            ("RAS200_employment_rate.png", "Employment rate (RAS200)", AS_PERCENT, "employment_rate"),
+            ("HFUDD11_share_high_education.png", "Share with higher education (HFUDD11)",
+             AS_PERCENT, "share_high_education"),
+            ("HFUDD11_share_education_unknown.png", "Share with education not stated (HFUDD11)",
+             AS_PERCENT, "share_education_unknown"),
+            ("INDKP111_average_wage.png", "Average wage of people with wage income, DKK (INDKP111)",
+             AS_NUMBER, "average_wage"),
+            ("LONS50_wage_log_sd.png", "Spread of wages: sd of log hourly earnings (LONS50)",
+             FuncFormatter(lambda value, _: f"{value:.2f}"), "wage_log_sd"),
+            ("UDDAKT10_FOLK1E_enrolment_rate.png", "Share enrolled in education (UDDAKT10 / FOLK1E)",
+             AS_PERCENT, "enrolment_rate")):
+        chart_by_year(file_name, title, y_format, rates, column)
+
+
 def download_all():
     DST_DATA_FOLDER.mkdir(exist_ok=True)
+    save_danish_table_a2()
+    print("  paper_table_a2_model2_denmark.csv: the paper's Danish odds ratios")
+    tables = {}
     for file_name, make_table in (("women_2010.csv", women_in_start_year),
                                   ("immigrant_share_2010.csv", immigrant_share_in_start_year),
                                   ("yearly_rates.csv", yearly_rates)):
-        table = make_table()
-        table.to_csv(DST_DATA_FOLDER / file_name, index=False)
-        print(f"  {file_name}: {len(table)} rows")
+        tables[file_name] = make_table()
+        tables[file_name].to_csv(DST_DATA_FOLDER / file_name, index=False)
+        print(f"  {file_name}: {len(tables[file_name])} rows")
+    save_charts(*tables.values())
+    print(f"  {len(list(DST_DATA_FOLDER.glob('*.png')))} charts saved in {DST_DATA_FOLDER.name}/")
 
 
 if __name__ == "__main__":

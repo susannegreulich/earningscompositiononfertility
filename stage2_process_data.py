@@ -1,16 +1,22 @@
 """
-STAGE 2 - Build the couple-year file from the raw registers: one row per
-couple per calendar year in which the woman is at risk of a first birth.
+STAGE 2 - Process the raw registers into the data the model is fitted on, in
+two steps:
 
-Uses ONLY the stage 1 register files in simulated_register_data/, as a researcher at Statistics Denmark
-would, and follows the paper's sample rules. Every register row describes a
-person's situation at the END of the calendar year.
+  1. Build the couple-year file: one row per couple per calendar year in which
+     the woman is at risk of a first birth. This uses ONLY the stage 1 register
+     files in 1simulated_register_data/, as a researcher at Statistics Denmark
+     would, and follows the paper's sample rules. Every register row describes
+     a person's situation at the END of the calendar year.
+  2. Collapse the couple-year file into the event-occurrence table: one row per
+     combination of the model variables, with the number of first births and
+     the number of couple-years. This is the format the paper's authors
+     received from each country team.
 """
 import numpy as np
 import pandas as pd
 
-from common import (COUPLE_YEAR_FILE, PROCESSED_DATA_FOLDER, REGISTER_FILES, age_group,
-                    constellation, wage_tercile)
+from common import (COUPLE_YEAR_FILE, EVENT_TABLE_FILE, PROCESSED_DATA_FOLDER, REGISTER_FILES,
+                    age_group, constellation, wage_tercile)
 
 # =============================================================================
 # PARAMETERS - sample definition (paper: Denmark 2010-2019, women 18-45)
@@ -19,10 +25,18 @@ OBSERVATION_YEARS = range(2010, 2020)   # calendar years that become couple-year
 MIN_AGE, MAX_AGE = 18, 45               # woman's age (year - birth year)
 YEARS_FROM_EVENT_TO_BIRTH = 1           # the event is a first birth this many years later
 EQUAL_EARNER_SHARE = (0.40, 0.60)       # her wage share counted as "equal earners"
+
+# ---- the event-occurrence table ---------------------------------------------------
+# The model variables that define a cell of the table.
+CELL_VARIABLES = ["woman_age_group", "earner_constellation", "household_wage_tercile",
+                  "woman_education", "either_partner_foreign"]
+# Statistical-office disclosure rule: cells with fewer couple-years are dropped
+# (0 = keep everything). Dropping cells changes the estimates - try it.
+MIN_COUPLE_YEARS_PER_CELL = 0
 # =============================================================================
 
 
-def build():
+def build_couple_years():
     population = pd.read_csv(REGISTER_FILES["bef"])    # who, age, origin, partner
     employment = pd.read_csv(REGISTER_FILES["ras"])    # employed or not, per person-year
     income = pd.read_csv(REGISTER_FILES["ind"])        # labour income, per person-year
@@ -117,6 +131,35 @@ def build():
     return couple_years
 
 
+def count_events(couple_years):
+    """Collapse the couple-year file into the event-occurrence table."""
+    # Group the couple-years by every model variable. That is at most
+    # 4 x 6 x 3 x 4 x 2 = 576 cells; combinations that never occur produce no
+    # row. For each cell: first_births = number of couple-years with the event,
+    # couple_years = number of rows (the exposure). The crude rate of a cell is
+    # first_births / couple_years, and a logit fitted to (first_births out of
+    # couple_years) gives exactly the same estimates as a logit on the
+    # individual couple-years.
+    cells = (couple_years.groupby(CELL_VARIABLES)["conceived_first_child_that_year"]
+             .agg(first_births="sum", couple_years="size").reset_index())
+
+    # Disclosure control: drop cells with too few couple-years.
+    too_small = cells.couple_years < MIN_COUPLE_YEARS_PER_CELL
+    suppressed_cells = cells[too_small]
+    cells = cells[~too_small]
+
+    cells.to_csv(EVENT_TABLE_FILE, index=False)
+    print(f"  {EVENT_TABLE_FILE.name}: {len(cells)} cells "
+          f"(of max 576; {len(suppressed_cells)} suppressed, "
+          f"{suppressed_cells.couple_years.sum():,} couple-years lost)")
+    return cells
+
+
+def process():
+    """Both steps: registers -> couple-years -> event-occurrence table."""
+    return count_events(build_couple_years())
+
+
 if __name__ == "__main__":
-    print("Stage 2: building couple-year file ...")
-    build()
+    print("Stage 2: processing the registers ...")
+    process()

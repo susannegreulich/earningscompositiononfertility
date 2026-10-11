@@ -6,10 +6,10 @@ import numpy as np
 
 # One folder per kind of data, in the order the pipeline produces them.
 PROJECT_FOLDER = Path(__file__).parent
-DST_DATA_FOLDER = PROJECT_FOLDER / "dst_data"                        # stage 0: Statistics Denmark figures
-SIMULATED_REGISTER_FOLDER = PROJECT_FOLDER / "simulated_register_data"   # stage 1: simulated registers
-PROCESSED_DATA_FOLDER = PROJECT_FOLDER / "processed_data"            # stages 2 and 3: couple-years, counts
-ESTIMATION_FOLDER = PROJECT_FOLDER / "estimation"                    # stage 4: estimation results
+DST_DATA_FOLDER = PROJECT_FOLDER / "0dst_data"                        # stage 0: Statistics Denmark figures
+SIMULATED_REGISTER_FOLDER = PROJECT_FOLDER / "1simulated_register_data"   # stage 1: simulated registers
+PROCESSED_DATA_FOLDER = PROJECT_FOLDER / "2processed_data"            # stage 2: couple-years, counts
+ESTIMATION_FOLDER = PROJECT_FOLDER / "3estimation"                    # stage 3: estimation results
 
 # The five simulated registers, named after the Danish registers they imitate:
 # bef = population, ras = employment, ind = income, udda = education, fod = births.

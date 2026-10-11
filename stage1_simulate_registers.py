@@ -9,12 +9,12 @@ How their traits are set:
   - drawn once and kept: birth year, origin, education, and when (if ever) she
     moves in with a partner;
   - drawn every year: employed, enrolled, wage. Each is drawn from that year's
-    Statistics Denmark figure for the person's sex and age, and does not
-    depend on any other trait;
-  - generated from the paper's model: whether a childless woman with a
+    Statistics Denmark average for the person's sex and age, and does not
+    depend on any other trait; however a degree of persistence is built-in to avoid jumps
+  - the first conceptions/births are generated using the paper's model and estimates: whether a childless woman with a
     partner conceives a first child that year.
 
-The Statistics Denmark figures are read from dst_data/, which stage 0
+The Statistics Denmark figures are read from 0dst_data/, which stage 0
 (stage0_download_dst_data.py) downloads; the comments there name each table.
 The partner age gap is also set in stage 0. The only numbers typed into this
 file are the paper's odds ratios and one assumption, P_KEEP_LAST_YEARS_POSITION.
@@ -24,7 +24,8 @@ import pandas as pd
 
 from common import (DST_DATA_FOLDER, REGISTER_FILES, SIMULATED_REGISTER_FOLDER, age_group,
                     constellation, wage_tercile)
-from stage0_download_dst_data import PARTNER_AGE_GAP_MEAN_AND_SD
+from stage0_download_dst_data import (DANISH_BASELINE_ODDS, DANISH_ODDS_RATIOS,
+                                      PARTNER_AGE_GAP_MEAN_AND_SD)
 
 # =============================================================================
 # PARAMETERS - edit these
@@ -48,32 +49,18 @@ YEARS = range(2010, 2020)           # years written to the register files
 P_KEEP_LAST_YEARS_POSITION = 0.8
 
 # ---- FIRST BIRTH ------------------------------------------------------------
-# Births are generated from the paper's logit model with controls (eq. 1,
-# Model 2), using the estimates in its Table A2:
+# Births are generated from the paper's logit model with controls (eq. 1 with
+# added controls, i.e. Model 2):
 #
 #   logit P(conception leading to a first birth this year)
 #       = ln(baseline odds) + the sum of ln(odds ratio) of each of the couple's traits
 #
-# The paper pools five countries with Norway as the reference, so each Danish
-# number is the pooled estimate x its "Denmark x ..." interaction; both factors
-# are written out below as they appear in Table A2. The woman's age has no
-# country interaction. An odds ratio of 1.0 marks the reference category.
-FIRST_BIRTH_BASELINE_ODDS = 0.133 * 0.581        # constant x Denmark
-FIRST_BIRTH_ODDS_RATIOS = {
-    "woman_age_group": {"18-25": 1.0, "26-30": 1.324, "31-35": 1.219, "36-45": 0.281},
-    "earner_constellation": {
-        "dual_equal_earners": 1.0,
-        "both_jobless": 0.670 * 1.132,
-        "male_works": 0.951 * 0.936,
-        "female_works": 0.799 * 1.041,
-        "dual_male_main_earner": 0.864 * 0.919,
-        "dual_female_main_earner": 0.921 * 1.107},
-    # Terciles among the couples at risk in the same year.
-    "household_wage_tercile": {"low": 1.0, "middle": 1.349 * 1.277, "high": 1.890 * 1.341},
-    "woman_education": {"low": 1.0, "enrolled": 0.542 * 1.470, "high": 1.197 * 1.141,
-                        "unknown": 1.113 * 0.897},
-    "either_partner_foreign": {0: 1.0, 1: 1.010 * 0.840},
-}
+# The baseline odds and the odds ratios are the DANISH values of the paper's
+# Table A2. They are typed in and computed in stage 0 (see the section "THE
+# PAPER'S TABLE A2" there), and listed in 0dst_data/paper_table_a2_model2_denmark.csv.
+# To try other values, change them in stage 0.
+FIRST_BIRTH_BASELINE_ODDS = DANISH_BASELINE_ODDS
+FIRST_BIRTH_ODDS_RATIOS = DANISH_ODDS_RATIOS
 # =============================================================================
 
 
@@ -91,25 +78,75 @@ def load_yearly_rates():
 
 
 def birth_probability(**traits):
-    """The yearly probability of a conception leading to a first birth.
+    """The yearly probability that a couple conceives a first child.
 
-    Takes one array per variable in FIRST_BIRTH_ODDS_RATIOS, for example
-    earner_constellation=[...], and applies the logit equation above.
+    Takes the couple's traits and returns a probability. It is the probability
+    for the COUPLE, not only the woman: her age group and education are hers,
+    but the earner constellation, the household-wage tercile and foreign origin
+    describe both partners.
+
+    It works on many couples at once: each input is an array with one entry per
+    couple (one array per variable in FIRST_BIRTH_ODDS_RATIOS, for example
+    earner_constellation=[...]), and the result is one probability per couple.
+
+    Example for one couple: she is 28 with a higher degree, both work with equal
+    wages, household wages are in the middle third, neither was born abroad.
+        baseline odds (0.133 x 0.581)             0.0773
+        x age 26-30                               1.324
+        x dual equal earners (reference)          1.0
+        x middle wage tercile (1.349 x 1.277)     1.723
+        x high education (1.197 x 1.141)          1.366
+        x not foreign (reference)                 1.0
+        = odds                                    0.241
+        probability = odds / (1 + odds)           0.194
+    So this couple has about a 19% chance of conceiving a first child that year.
+
+    This function only returns the probability. The yes or no is decided in
+    yearly_traits(), which draws a random number between 0 and 1 for each couple; a
+    conception occurs if it falls below the probability.
     """
+    # The same calculation on the log scale: add up ln(odds ratio) for each
+    # trait, then turn the sum into a probability.
     log_odds = np.log(FIRST_BIRTH_BASELINE_ODDS)
     for variable, odds_ratios in FIRST_BIRTH_ODDS_RATIOS.items():
         log_odds = log_odds + np.log([odds_ratios[value] for value in traits[variable]])
     return 1 / (1 + np.exp(-log_odds))
 
 
-def simulate():
-    """Run the simulation and write the five register files.
+def new_positions(random, count):
+    """Where a person stands in each yearly distribution: a number between 0
+    and 1 for employment and enrolment, a standard normal draw for wages."""
+    return {"employment": random.random(count), "enrolment": random.random(count),
+            "wage": random.normal(0, 1, count)}
 
-    Every woman is one position in a set of numpy arrays. Her partner, once she
-    has one, lives in the parallel man_* arrays at the same position.
+
+def traits_this_year(rate, sex, year, age, position, education_position, high_education):
+    """One year's employment, enrolment, education and wage, from the Statistics
+    Denmark figures for the person's sex and age. Nothing is drawn here: each
+    person's position is compared with the published rate."""
+    # Employed if the position is below the employment rate (RAS200); enrolled
+    # if below the enrolment rate (UDDAKT10 / FOLK1E).
+    employed = position["employment"] < rate("employment_rate", sex, year, age)
+    enrolled = position["enrolment"] < rate("enrolment_rate", sex, year, age)
+    # Education (HFUDD11): high if the fixed position is below the share with
+    # a higher degree; unknown if it is in the top share with education not stated.
+    high_education |= education_position < rate("share_high_education", sex, year, age)
+    education_unknown = education_position > 1 - rate("share_education_unknown", sex, year, age)
+    # Wage: log-normal, with the average of people with wage income
+    # (INDKP111) and the spread of hourly earnings (LONS50). 0 if not employed.
+    log_sd = rate("wage_log_sd", sex, year, age)
+    log_mean = np.log(rate("average_wage", sex, year, age)) - log_sd ** 2 / 2
+    wage = np.where(employed, np.round(np.exp(log_mean + log_sd * position["wage"]), -2), 0.0)
+    return employed, enrolled & ~education_unknown, education_unknown, wage
+
+
+def fixed_traits(random):
+    """PART 1 - The women, and everything about them that is drawn once and
+    never changes: how many there are, birth year, origin, education position,
+    and the year each moves in with a partner.
+
+    Every woman is one position in each of the arrays returned.
     """
-    random = np.random.default_rng(SEED)
-    rate = load_yearly_rates()
     women_2010 = pd.read_csv(DST_DATA_FOLDER / "women_2010.csv").set_index("age_on_1_january")
     immigrant_share = (pd.read_csv(DST_DATA_FOLDER / "immigrant_share_2010.csv")
                        .set_index(["sex", "age"])["share_immigrant"])
@@ -124,17 +161,8 @@ def simulate():
     woman_birth_year = np.repeat(cohorts.birth_year.to_numpy(), women_per_cohort)
     number_of_women = len(woman_birth_year)
     woman_age_at_start = first_year - 1 - woman_birth_year         # age on 1 January 2010
-    # Person IDs: women from 1,000,000, men from 5,000,000, children from 9,000,000.
-    woman_id = 1_000_000 + np.arange(number_of_women)
-    next_man_id, next_child_id = 5_000_000, 9_000_000
 
-    def new_positions(count):
-        """Where a person stands in each yearly distribution: a number between 0
-        and 1 for employment and enrolment, a standard normal draw for wages."""
-        return {"employment": random.random(count), "enrolment": random.random(count),
-                "wage": random.normal(0, 1, count)}
-
-    # ---- the woman: traits drawn once ---------------------------------------------
+    # ---- origin and education --------------------------------------------------------
     # Born abroad: the share of immigrants among women of her age in 2010 (FOLK1E).
     woman_foreign_born = random.random(number_of_women) < immigrant_share["F"].reindex(
         woman_age_at_start).to_numpy()
@@ -142,9 +170,6 @@ def simulate():
     # as high-educated if that position is below the share with a higher degree
     # at her age (HFUDD11); once reached, the degree is kept.
     woman_education_position = random.random(number_of_women)
-    woman_high_education = np.zeros(number_of_women, bool)
-    woman_position = new_positions(number_of_women)
-    woman_had_first_conception = np.zeros(number_of_women, bool)
 
     # ---- when she moves in with a partner (drawn once) --------------------------------
     # At the start of 2010 she lives with a partner with the share observed among
@@ -167,34 +192,47 @@ def simulate():
     year_moving_in = np.where(never_moves_in, 9999, first_year - 1 + age_moving_in - woman_age_at_start)
     year_moving_in[with_partner_at_start] = first_year - 1
 
+    return {"person_id": 1_000_000 + np.arange(number_of_women),      # women's IDs start at 1,000,000
+            "birth_year": woman_birth_year, "foreign_born": woman_foreign_born,
+            "education_position": woman_education_position, "year_moving_in": year_moving_in}
+
+
+def yearly_traits(random, women):
+    """PART 2 - Follow the women through the years. Each year: positions carry
+    over or are redrawn, partners move in, that year's employment, enrolment,
+    education and wage are set, childless couples may conceive, and the
+    register rows are written.
+
+    Her partner, once she has one, lives in the man_* arrays at the same
+    position as she does. Returns the rows of the five registers.
+    """
+    rate = load_yearly_rates()
+    immigrant_share = (pd.read_csv(DST_DATA_FOLDER / "immigrant_share_2010.csv")
+                       .set_index(["sex", "age"])["share_immigrant"])
+    first_year = min(YEARS)
+    woman_id, woman_birth_year = women["person_id"], women["birth_year"]
+    woman_foreign_born, year_moving_in = women["foreign_born"], women["year_moving_in"]
+    woman_education_position = women["education_position"]
+    number_of_women = len(woman_id)
+    # IDs: men from 5,000,000, children from 9,000,000.
+    next_man_id, next_child_id = 5_000_000, 9_000_000
+
+    # ---- the woman: what changes over the years -------------------------------------
+    woman_position = new_positions(random, number_of_women)
+    woman_high_education = np.zeros(number_of_women, bool)
+    woman_had_first_conception = np.zeros(number_of_women, bool)
+
     # ---- her partner (man_id 0 = none yet) ---------------------------------------------
-    # A man exists in the registers only from the year he moves in.
+    # A man exists in the registers only from the year he moves in. His own
+    # fixed traits (birth year, origin, education position) are drawn in that year.
     man_id = np.zeros(number_of_women, int)
     man_birth_year = np.zeros(number_of_women, int)
     man_foreign_born = np.zeros(number_of_women, bool)
     man_education_position = np.zeros(number_of_women)
     man_high_education = np.zeros(number_of_women, bool)
-    man_position = new_positions(number_of_women)
+    man_position = new_positions(random, number_of_women)
 
     register_rows = {name: [] for name in REGISTER_FILES}        # one chunk of rows per year
-
-    def yearly_traits(sex, year, age, position, education_position, high_education):
-        """This year's employment, enrolment, education and wage, from the
-        Statistics Denmark figures for the person's sex and age."""
-        # Employed if her position is below the employment rate (RAS200); enrolled
-        # if below the enrolment rate (UDDAKT10 / FOLK1E).
-        employed = position["employment"] < rate("employment_rate", sex, year, age)
-        enrolled = position["enrolment"] < rate("enrolment_rate", sex, year, age)
-        # Education (HFUDD11): high if the fixed position is below the share with
-        # a higher degree; unknown if it is in the top share with education not stated.
-        high_education |= education_position < rate("share_high_education", sex, year, age)
-        education_unknown = education_position > 1 - rate("share_education_unknown", sex, year, age)
-        # Wage: log-normal, with the average of people with wage income
-        # (INDKP111) and the spread of hourly earnings (LONS50). 0 if not employed.
-        log_sd = rate("wage_log_sd", sex, year, age)
-        log_mean = np.log(rate("average_wage", sex, year, age)) - log_sd ** 2 / 2
-        wage = np.where(employed, np.round(np.exp(log_mean + log_sd * position["wage"]), -2), 0.0)
-        return employed, enrolled & ~education_unknown, education_unknown, wage
 
     def add_register_rows(year, sex, person_id, birth_year, foreign_born, partner_id, employed, wage,
                           enrolled, high_education, education_unknown):
@@ -224,7 +262,7 @@ def simulate():
         # ---- positions carry over from last year, or are drawn afresh ---------------
         if year > first_year:
             for position in (woman_position, man_position):
-                fresh = new_positions(number_of_women)
+                fresh = new_positions(random, number_of_women)
                 for name in position:
                     keeps_position = random.random(number_of_women) < P_KEEP_LAST_YEARS_POSITION
                     position[name] = np.where(keeps_position, position[name], fresh[name])
@@ -248,10 +286,10 @@ def simulate():
 
         # ---- this year's traits ------------------------------------------------------------
         man_age = year - man_birth_year
-        woman_employed, woman_enrolled, woman_education_unknown, woman_wage = yearly_traits(
-            "F", year, woman_age, woman_position, woman_education_position, woman_high_education)
-        man_employed, man_enrolled, man_education_unknown, man_wage = yearly_traits(
-            "M", year, man_age, man_position, man_education_position, man_high_education)
+        woman_employed, woman_enrolled, woman_education_unknown, woman_wage = traits_this_year(
+            rate, "F", year, woman_age, woman_position, woman_education_position, woman_high_education)
+        man_employed, man_enrolled, man_education_unknown, man_wage = traits_this_year(
+            rate, "M", year, man_age, man_position, man_education_position, man_high_education)
 
         # ---- conception ----------------------------------------------------------------------
         # At risk: living with a partner, no first conception yet, aged 18-45.
@@ -294,6 +332,15 @@ def simulate():
                           man_foreign_born[partnered], woman_id[partnered], man_employed[partnered],
                           man_wage[partnered], man_enrolled[partnered], man_high_education[partnered],
                           man_education_unknown[partnered])
+
+    return register_rows
+
+
+def simulate():
+    """Run the simulation and write the five register files."""
+    random = np.random.default_rng(SEED)
+    women = fixed_traits(random)
+    register_rows = yearly_traits(random, women)
 
     SIMULATED_REGISTER_FOLDER.mkdir(exist_ok=True)
     for name, yearly_chunks in register_rows.items():
