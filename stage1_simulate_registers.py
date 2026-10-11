@@ -10,21 +10,24 @@ How their traits are set:
     moves in with a partner;
   - drawn every year: employed, enrolled, wage. Each is drawn from that year's
     Statistics Denmark average for the person's sex and age, and does not
-    depend on any other trait; however a degree of persistence is built-in to avoid jumps
-  - the first conceptions/births are generated using the paper's model and estimates: whether a childless woman with a
-    partner conceives a first child that year.
+    depend on any other trait; however a degree of persistence is built-in to
+    avoid jumps;
+  - the first conceptions/births are generated using the paper's model and
+    estimates: whether a childless woman with a partner conceives a first
+    child that year.
 
-The Statistics Denmark figures are read from 0dst_data/, which stage 0
-(stage0_download_dst_data.py) downloads; the comments there name each table.
-The partner age gap is also set in stage 0. The only numbers typed into this
-file are the paper's odds ratios and one assumption, P_KEEP_LAST_YEARS_POSITION.
+The Statistics Denmark figures are read from 0data/, which stage 0
+(stage0_data.py) downloads; the comments there name each table.
+The partner age gap and the paper's odds ratios are also set in stage 0. The
+only numbers typed into this file are the settings below, of which one is an
+assumption: P_KEEP_LAST_YEARS_POSITION.
 """
 import numpy as np
 import pandas as pd
 
-from common import (DST_DATA_FOLDER, REGISTER_FILES, SIMULATED_REGISTER_FOLDER, age_group,
+from common import (DST_DATA_FOLDER, REGISTER_FILES, SIMULATED_REGISTER_FOLDER, YEARS, age_group,
                     constellation, wage_tercile)
-from stage0_download_dst_data import (DANISH_BASELINE_ODDS, DANISH_ODDS_RATIOS,
+from stage0_data import (DANISH_BASELINE_ODDS, DANISH_ODDS_RATIOS,
                                       PARTNER_AGE_GAP_MEAN_AND_SD)
 
 # =============================================================================
@@ -34,8 +37,8 @@ SEED = 2026
 # Share of Denmark's childless women that is simulated. 1.0 is every one of
 # them (about 760,000 women, which takes several minutes and over 1 GB of files).
 POPULATION_SCALE = 0.2
-BIRTH_COHORTS = range(1965, 2002)   # birth years of the simulated women
-YEARS = range(2010, 2020)           # years written to the register files
+BIRTH_COHORTS = range(1965, 2002)   # birth years of the simulated women: everyone who is
+                                    # aged 18-45 at some point in YEARS (2010-2019)
 
 # ---- STAYING THE SAME FROM YEAR TO YEAR -----------------------------------------
 # Employment, enrolment and wage are drawn from each year's Statistics Denmark
@@ -56,25 +59,32 @@ P_KEEP_LAST_YEARS_POSITION = 0.8
 #       = ln(baseline odds) + the sum of ln(odds ratio) of each of the couple's traits
 #
 # The baseline odds and the odds ratios are the DANISH values of the paper's
-# Table A2. They are typed in and computed in stage 0 (see the section "THE
-# PAPER'S TABLE A2" there), and listed in 0dst_data/paper_table_a2_model2_denmark.csv.
-# To try other values, change them in stage 0.
-FIRST_BIRTH_BASELINE_ODDS = DANISH_BASELINE_ODDS
-FIRST_BIRTH_ODDS_RATIOS = DANISH_ODDS_RATIOS
+# Table A2: DANISH_BASELINE_ODDS and DANISH_ODDS_RATIOS. They are typed in and
+# computed in stage 0 (see the section "THE PAPER'S TABLE A2" there), and listed
+# in 0data/paper_table_a2_model2_denmark.csv. To try other values, change
+# them in stage 0.
 # =============================================================================
 
 
 def load_yearly_rates():
     """The yearly Statistics Denmark figures, as a lookup: rate(name, sex, year, age)."""
     table = pd.read_csv(DST_DATA_FOLDER / "yearly_rates.csv")
-    youngest_age, first_year = table.age.min(), table.year.min()
-    by_sex = {sex: one_sex.set_index(["year", "age"]) for sex, one_sex in table.groupby("sex")}
+    youngest_age, oldest_age, first_year = table.age.min(), table.age.max(), table.year.min()
+    # One grid per sex: a row per year and a column per age, for every figure.
+    grid = {sex: one_sex.set_index(["year", "age"]).unstack("age")
+            for sex, one_sex in table.groupby("sex")}
 
     def rate(name, sex, year, age):
         # Ages outside the table (18-65) get the figure of the nearest age in it.
-        figures = by_sex[sex][name].unstack("age").to_numpy()
-        return figures[year - first_year, np.clip(age - youngest_age, 0, figures.shape[1] - 1)]
+        return grid[sex][name].to_numpy()[year - first_year,
+                                          np.clip(age, youngest_age, oldest_age) - youngest_age]
     return rate
+
+
+def load_immigrant_share():
+    """The share of immigrants by sex and age in 2010 (FOLK1E): share[sex][age]."""
+    return (pd.read_csv(DST_DATA_FOLDER / "immigrant_share_2010.csv")
+            .set_index(["sex", "age"])["share_immigrant"])
 
 
 def birth_probability(**traits):
@@ -86,7 +96,7 @@ def birth_probability(**traits):
     describe both partners.
 
     It works on many couples at once: each input is an array with one entry per
-    couple (one array per variable in FIRST_BIRTH_ODDS_RATIOS, for example
+    couple (one array per variable in DANISH_ODDS_RATIOS, for example
     earner_constellation=[...]), and the result is one probability per couple.
 
     Example for one couple: she is 28 with a higher degree, both work with equal
@@ -107,8 +117,8 @@ def birth_probability(**traits):
     """
     # The same calculation on the log scale: add up ln(odds ratio) for each
     # trait, then turn the sum into a probability.
-    log_odds = np.log(FIRST_BIRTH_BASELINE_ODDS)
-    for variable, odds_ratios in FIRST_BIRTH_ODDS_RATIOS.items():
+    log_odds = np.log(DANISH_BASELINE_ODDS)
+    for variable, odds_ratios in DANISH_ODDS_RATIOS.items():
         log_odds = log_odds + np.log([odds_ratios[value] for value in traits[variable]])
     return 1 / (1 + np.exp(-log_odds))
 
@@ -148,8 +158,7 @@ def fixed_traits(random):
     Every woman is one position in each of the arrays returned.
     """
     women_2010 = pd.read_csv(DST_DATA_FOLDER / "women_2010.csv").set_index("age_on_1_january")
-    immigrant_share = (pd.read_csv(DST_DATA_FOLDER / "immigrant_share_2010.csv")
-                       .set_index(["sex", "age"])["share_immigrant"])
+    immigrant_share = load_immigrant_share()
     first_year = min(YEARS)
 
     # ---- who is simulated ---------------------------------------------------------
@@ -207,8 +216,7 @@ def yearly_traits(random, women):
     position as she does. Returns the rows of the five registers.
     """
     rate = load_yearly_rates()
-    immigrant_share = (pd.read_csv(DST_DATA_FOLDER / "immigrant_share_2010.csv")
-                       .set_index(["sex", "age"])["share_immigrant"])
+    immigrant_share = load_immigrant_share()
     first_year = min(YEARS)
     woman_id, woman_birth_year = women["person_id"], women["birth_year"]
     woman_foreign_born, year_moving_in = women["foreign_born"], women["year_moving_in"]

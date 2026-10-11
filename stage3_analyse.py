@@ -1,17 +1,13 @@
 """
 STAGE 3 - Estimate the paper's logit model (Model 2) on the event-occurrence
-table and compare the results with the paper. Uses ONLY the stage 2
-event-occurrence table, plus the stage 1 parameters as the benchmark.
+table and compare the odds ratios with the Danish odds ratios of the paper's
+Table A2, as a table and as a chart. A second chart shows the odds themselves
+for each constellation, written as fractions ("1 to 13"). Uses ONLY the stage 2
+event-occurrence table, plus the Danish Table A2 values from stage 0, which stage 1
+generated the births from.
 
-Two results are produced:
-  - the odds ratios, next to the Danish odds ratios in the paper's Table A2;
-  - the average marginal probability of conception for each employment-wage
-    constellation, as a table and as a figure in the style of the paper's
-    Figure 2.
-
-The model is the equation the births were generated from in stage 1, so its
-odds ratios should reproduce Table A2 whatever the simulated population looks
-like.
+The model is the equation the births were generated from, so its odds ratios
+should reproduce Table A2 whatever the simulated population looks like.
 """
 import matplotlib
 matplotlib.use("Agg")
@@ -19,36 +15,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from patsy import build_design_matrices, dmatrix
+from patsy import dmatrix
 
-import stage1_simulate_registers
-from common import (AGE_GROUPS, CONSTELLATION_LABELS, CONSTELLATIONS, EDUCATION_LEVELS,
-                    ESTIMATION_FOLDER, EVENT_TABLE_FILE, HOUSEHOLD_WAGE_TERCILES)
+from common import CONSTELLATION_LABELS, CONSTELLATIONS, ESTIMATION_FOLDER, EVENT_TABLE_FILE
+from stage0_data import DANISH_BASELINE_ODDS, DANISH_ODDS_RATIOS
 
 # The paper's Model 2 (eq. 1 plus controls): the woman's age group, the
 # couple's constellation, household-wage tercile, her education and foreign
 # origin.
 MODEL_FORMULA = ("woman_age_group + earner_constellation + household_wage_tercile"
                  " + woman_education + either_partner_foreign")
-# Category order of each variable; the first category is the reference.
-CATEGORY_ORDER = {"woman_age_group": AGE_GROUPS, "earner_constellation": CONSTELLATIONS,
-                  "household_wage_tercile": HOUSEHOLD_WAGE_TERCILES,
-                  "woman_education": EDUCATION_LEVELS}
-
-# Table A2, Model 2, for Denmark: the values stage 1 generated the births from.
-# Stage 0 computes them (main row x Denmark row) and lists them in
-# 0dst_data/paper_table_a2_model2_denmark.csv.
-PAPER_BASELINE_ODDS = stage1_simulate_registers.FIRST_BIRTH_BASELINE_ODDS
-PAPER_ODDS_RATIOS = stage1_simulate_registers.FIRST_BIRTH_ODDS_RATIOS
-
-# The paper's Figure 2, Denmark, Model 2 bars. The paper prints no numbers for
-# them, so these are read off the figure by eye and are approximate.
-PAPER_FIGURE_2_DENMARK_MODEL_2 = {
-    "both_jobless": 0.098, "male_works": 0.113, "female_works": 0.106,
-    "dual_male_main_earner": 0.102, "dual_female_main_earner": 0.126, "dual_equal_earners": 0.125}
-# Constellations in the order of the paper's Figure 2.
-FIGURE_ORDER = ["both_jobless", "male_works", "female_works", "dual_male_main_earner",
-                "dual_female_main_earner", "dual_equal_earners"]
+# Category order of each variable, as in stage 0's table of the paper's odds
+# ratios; the first category is the reference. Foreign origin is a 0/1 number
+# and needs no order.
+CATEGORY_ORDER = {variable: list(odds_ratios) for variable, odds_ratios in DANISH_ODDS_RATIOS.items()
+                  if variable != "either_partner_foreign"}
 
 
 def load_cells():
@@ -65,8 +46,7 @@ def fit_model(cells):
     design_matrix = dmatrix(MODEL_FORMULA, cells, return_type="dataframe")
     births_and_non_births = np.column_stack([cells.first_births,
                                              cells.couple_years - cells.first_births])
-    fitted = sm.GLM(births_and_non_births, design_matrix, family=sm.families.Binomial()).fit()
-    return fitted, design_matrix.design_info
+    return sm.GLM(births_and_non_births, design_matrix, family=sm.families.Binomial()).fit()
 
 
 def odds_ratio_table(fitted):
@@ -79,11 +59,11 @@ def odds_ratio_table(fitted):
         # "variable" for the 0/1 foreign-origin indicator.
         if term == "Intercept":
             variable, category = "baseline odds", ""
-            danish_value = PAPER_BASELINE_ODDS
+            danish_value = DANISH_BASELINE_ODDS
         else:
             variable, _, category = term.rstrip("]").partition("[T.")
             category = category or 1
-            danish_value = PAPER_ODDS_RATIOS[variable][category]
+            danish_value = DANISH_ODDS_RATIOS[variable][category]
         rows.append({"variable": variable, "category": category,
                      "estimated_odds_ratio": np.exp(fitted.params[term]),
                      "lower_95": interval.loc[term, 0], "upper_95": interval.loc[term, 1],
@@ -94,78 +74,66 @@ def odds_ratio_table(fitted):
     return odds_ratios
 
 
-def average_marginal_probabilities(cells, fitted, design_info):
-    """The average marginal probability of conception for each constellation.
+def odds_by_constellation(fitted):
+    """The ODDS of conceiving (not the odds ratio) for each constellation.
 
-    What it is: take every couple-year in the sample, pretend the couple had
-    this constellation while keeping its other traits (age group, wage tercile,
-    education, origin) as they are, predict its probability of conceiving from
-    the model, and average over the whole sample. Doing this for each
-    constellation in turn gives six probabilities that differ ONLY because of
-    the constellation, since the mix of other traits is the same in all six.
-    This is what the bars in the paper's Figure 2 show.
+    Odds = couples that conceive for each couple that does not. They are given
+    for one fixed couple, the reference couple (woman 18-25, low wage tercile,
+    low education, neither partner born abroad), in each constellation:
 
-    Unlike an odds ratio, the result depends on the sample: a sample with more
-    young or low-wage couples has lower probabilities for every constellation.
+        odds = baseline odds x the constellation's odds ratio
+
+    For dual equal earners, the reference constellation, the odds ratio is 1,
+    so the odds are the baseline odds themselves. Odds of 0.077 are the same as
+    "1 to 13": 1 / 0.077 = 13 couples that do not conceive for each one that does.
     """
-    cell_weight = cells.couple_years.to_numpy() / cells.couple_years.sum()
-    coefficients = fitted.params.to_numpy()
-    coefficient_covariance = fitted.cov_params().to_numpy()
+    covariance = fitted.cov_params()
     rows = []
-    for constellation_name in FIGURE_ORDER:
-        # Estimated: every cell gets this constellation, then predict and average.
-        as_if = cells.copy()
-        as_if["earner_constellation"] = pd.Categorical([constellation_name] * len(cells),
-                                                       categories=CONSTELLATIONS)
-        design_matrix = np.asarray(build_design_matrices([design_info], as_if)[0])
-        probability = 1 / (1 + np.exp(-design_matrix @ coefficients))
-        average_probability = cell_weight @ probability
-        # Standard error by the delta method: gradient' x covariance x gradient,
-        # where the gradient is how the average moves with each coefficient.
-        gradient = (cell_weight * probability * (1 - probability)) @ design_matrix
-        standard_error = np.sqrt(gradient @ coefficient_covariance @ gradient)
-        # Implied by Table A2: the same average, using the odds ratios that
-        # stage 1 generated the births from instead of the estimated ones.
-        implied_by_table_a2 = cell_weight @ stage1_simulate_registers.birth_probability(
-            woman_age_group=cells.woman_age_group.astype(str),
-            earner_constellation=[constellation_name] * len(cells),
-            household_wage_tercile=cells.household_wage_tercile.astype(str),
-            woman_education=cells.woman_education.astype(str),
-            either_partner_foreign=cells.either_partner_foreign)
+    # The reference constellation last, as in the paper's figures.
+    for constellation_name in CONSTELLATIONS[1:] + CONSTELLATIONS[:1]:
+        term = f"earner_constellation[T.{constellation_name}]"
+        # On the log scale the odds are a sum: intercept + the constellation's
+        # coefficient (nothing is added for the reference constellation).
+        log_odds = fitted.params["Intercept"]
+        variance = covariance.loc["Intercept", "Intercept"]
+        if term in fitted.params:
+            log_odds += fitted.params[term]
+            # Variance of a sum of two estimates: var(a) + var(b) + 2 cov(a, b).
+            variance += covariance.loc[term, term] + 2 * covariance.loc["Intercept", term]
+        odds = np.exp(log_odds)
+        paper_odds = DANISH_BASELINE_ODDS * DANISH_ODDS_RATIOS["earner_constellation"][constellation_name]
         rows.append({"earner_constellation": constellation_name,
-                     "average_marginal_probability": average_probability,
-                     "lower_95": average_probability - 1.96 * standard_error,
-                     "upper_95": average_probability + 1.96 * standard_error,
-                     "implied_by_table_a2_on_this_sample": implied_by_table_a2,
-                     "paper_figure_2_approximate": PAPER_FIGURE_2_DENMARK_MODEL_2[constellation_name]})
+                     "estimated_odds": odds,
+                     "lower_95": np.exp(log_odds - 1.96 * np.sqrt(variance)),
+                     "upper_95": np.exp(log_odds + 1.96 * np.sqrt(variance)),
+                     "estimated_odds_as_fraction": f"1 to {1 / odds:.1f}",
+                     "table_a2_danish_odds": paper_odds,
+                     "table_a2_danish_odds_as_fraction": f"1 to {1 / paper_odds:.1f}"})
     return pd.DataFrame(rows)
 
 
-def plot_average_marginal_probabilities(probabilities, figure_file):
-    """Bars with 95% confidence intervals, in the layout of the paper's Figure 2
-    (Denmark, Model 2). Diamonds: what Table A2's odds ratios imply on this
-    sample. Dashes: the paper's own bars, read off its figure."""
-    position = np.arange(len(probabilities))
-    figure, axis = plt.subplots(figsize=(9, 4.8), dpi=150)
-    axis.bar(position, probabilities.average_marginal_probability, 0.5, color="#2a78d6",
-             label="Estimated on the simulated data", zorder=2)
-    axis.errorbar(position, probabilities.average_marginal_probability,
-                  yerr=probabilities.upper_95 - probabilities.average_marginal_probability,
+def bar_chart(figure_file, title, y_label, labels, estimate, lower, upper, paper,
+              line_at_one=False, text_above_bars=None):
+    """The chart used for every result: one bar per group for the estimate, its
+    95% confidence interval, and a white diamond for the paper's Danish value."""
+    position = np.arange(len(labels))
+    figure, axis = plt.subplots(figsize=(max(5.5, 1.7 * len(labels)), 4.9), dpi=150)
+    axis.bar(position, estimate, 0.5, color="#2a78d6", label="Estimated on the simulated data", zorder=2)
+    axis.errorbar(position, estimate, yerr=[estimate - lower, upper - estimate],
                   fmt="none", ecolor="#1f1f1e", lw=1, capsize=2, zorder=3)
-    axis.scatter(position, probabilities.implied_by_table_a2_on_this_sample, marker="D", s=34,
-                 facecolor="white", edgecolor="#1f1f1e", lw=1.3, zorder=4,
-                 label="Implied by Table A2's odds ratios on this sample")
-    axis.scatter(position + 0.36, probabilities.paper_figure_2_approximate, marker="_", s=260,
-                 color="#eb6834", lw=2.5, zorder=4,
-                 label="Paper's Figure 2, Denmark, Model 2 (read off the figure)")
-    # Labels on two lines, so that neighbouring ones do not run into each other.
-    axis.set_xticks(position, [CONSTELLATION_LABELS[c].replace(", ", ",\n")
-                               for c in probabilities.earner_constellation], fontsize=9)
-    axis.set_ylabel("Average marginal probability of a first birth", fontsize=9)
-    axis.set_title("Simulated Denmark: average marginal probability of conception leading to a "
-                   "first birth,\nby couples' employment-wage constellation (Model 2)",
-                   fontsize=10.5, loc="left")
-    axis.set_ylim(0, 0.2)
+    axis.scatter(position, paper, marker="D", s=34, facecolor="white", edgecolor="#1f1f1e",
+                 lw=1.3, zorder=4, label="Paper, Table A2, Denmark")
+    if line_at_one:
+        # An odds ratio of 1 means the same odds as the reference category.
+        axis.axhline(1, color="#6b6a63", lw=0.8)
+    if text_above_bars is not None:
+        for x, top, text in zip(position, upper, text_above_bars):
+            axis.text(x, top * 1.03, text, ha="center", va="bottom", fontsize=10, color="#0b0b0b")
+    axis.set_xticks(position, labels, fontsize=9)
+    axis.set_ylabel(y_label, fontsize=9)
+    axis.set_title(title, fontsize=10, loc="left")
+    # Room above the bars for the legend, so that it does not cover them.
+    axis.set_ylim(0, max(1.0 if line_at_one else 0, upper.max()) * 1.4)
     axis.grid(axis="y", color="#e4e3dd", lw=0.6, zorder=0)
     for side in ("top", "right"):
         axis.spines[side].set_visible(False)
@@ -176,23 +144,72 @@ def plot_average_marginal_probabilities(probabilities, figure_file):
     plt.close(figure)
 
 
+# Constellation labels on two lines, so that neighbouring ones do not run into each other.
+CONSTELLATION_CHART_LABELS = {name: label.replace(", ", ",\n")
+                              for name, label in CONSTELLATION_LABELS.items()}
+# The odds-ratio charts: one per variable. For each: the file name, the title,
+# what the bars are compared with, and a readable label for each category.
+ODDS_RATIO_CHARTS = {
+    "earner_constellation": {
+        "file_name": "fig_odds_ratios_by_constellation.png",
+        "title": "odds ratios by employment-wage constellation",
+        "reference": "dual earners with equal wages",
+        "labels": CONSTELLATION_CHART_LABELS},
+    "household_wage_tercile": {
+        "file_name": "fig_odds_ratios_by_household_wages.png",
+        "title": "odds ratios by household wages",
+        "reference": "couples in the low third of household wages",
+        "labels": {"middle": "Middle third", "high": "High third"}},
+    "woman_age_group": {
+        "file_name": "fig_odds_ratios_by_age.png",
+        "title": "odds ratios by the woman's age",
+        "reference": "couples where the woman is aged 18-25",
+        "labels": {"26-30": "26-30", "31-35": "31-35", "36-45": "36-45"}},
+}
+
+
+def plot_odds_ratios(odds_ratios, variable):
+    """One variable's odds ratios. The reference category has no bar: it is the line at 1."""
+    chart = ODDS_RATIO_CHARTS[variable]
+    estimates = odds_ratios[odds_ratios.variable == variable]
+    bar_chart(ESTIMATION_FOLDER / chart["file_name"],
+              f"Simulated Denmark: {chart['title']} (Model 2)\nrelative to {chart['reference']}",
+              "Odds ratio of conceiving a first child",
+              [chart["labels"][str(category)] for category in estimates.category],
+              estimates.estimated_odds_ratio, estimates.lower_95, estimates.upper_95,
+              estimates.table_a2_danish_odds_ratio, line_at_one=True)
+
+
+def plot_odds_by_constellation(odds):
+    """The odds of each constellation, each bar labelled as a fraction ("1 to 13")."""
+    bar_chart(ESTIMATION_FOLDER / "fig_odds_by_constellation.png",
+              "Simulated Denmark: odds of conceiving a first child within a year, by constellation "
+              "(Model 2)\nfor a couple with the woman aged 18-25, low household wages, low "
+              "education, neither born abroad",
+              "Odds: couples that conceive per couple that does not",
+              [CONSTELLATION_CHART_LABELS[name] for name in odds.earner_constellation],
+              odds.estimated_odds, odds.lower_95, odds.upper_95, odds.table_a2_danish_odds,
+              text_above_bars=odds.estimated_odds_as_fraction)
+
+
 def analyse():
     cells = load_cells()
-    fitted, design_info = fit_model(cells)
+    fitted = fit_model(cells)
     odds_ratios = odds_ratio_table(fitted)
-    probabilities = average_marginal_probabilities(cells, fitted, design_info)
+    odds = odds_by_constellation(fitted)
 
     ESTIMATION_FOLDER.mkdir(exist_ok=True)
     odds_ratios.to_csv(ESTIMATION_FOLDER / "odds_ratios.csv", index=False)
-    probabilities.to_csv(ESTIMATION_FOLDER / "average_marginal_probabilities.csv", index=False)
-    plot_average_marginal_probabilities(
-        probabilities, ESTIMATION_FOLDER / "fig_average_marginal_probabilities.png")
+    for variable in ODDS_RATIO_CHARTS:
+        plot_odds_ratios(odds_ratios, variable)
+    odds.to_csv(ESTIMATION_FOLDER / "odds_by_constellation.csv", index=False)
+    plot_odds_by_constellation(odds)
 
     pd.set_option("display.width", 220)
     print(odds_ratios.round(3).to_string(index=False))
     print(f"  the paper's Danish odds ratio is inside the 95% interval for "
           f"{odds_ratios.paper_within_interval.sum()} of {len(odds_ratios)} estimates")
-    print(probabilities.round(3).to_string(index=False))
+    print(odds.round(4).to_string(index=False))
     print(f"  results: {ESTIMATION_FOLDER}/")
 
 

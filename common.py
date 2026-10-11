@@ -6,7 +6,7 @@ import numpy as np
 
 # One folder per kind of data, in the order the pipeline produces them.
 PROJECT_FOLDER = Path(__file__).parent
-DST_DATA_FOLDER = PROJECT_FOLDER / "0dst_data"                        # stage 0: Statistics Denmark figures
+DST_DATA_FOLDER = PROJECT_FOLDER / "0data"                        # stage 0: Statistics Denmark figures
 SIMULATED_REGISTER_FOLDER = PROJECT_FOLDER / "1simulated_register_data"   # stage 1: simulated registers
 PROCESSED_DATA_FOLDER = PROJECT_FOLDER / "2processed_data"            # stage 2: couple-years, counts
 ESTIMATION_FOLDER = PROJECT_FOLDER / "3estimation"                    # stage 3: estimation results
@@ -18,6 +18,10 @@ REGISTER_FILES = {name: SIMULATED_REGISTER_FOLDER / f"{name}.csv"
 COUPLE_YEAR_FILE = PROCESSED_DATA_FOLDER / "couple_years.csv"
 EVENT_TABLE_FILE = PROCESSED_DATA_FOLDER / "event_occurrence_table.csv"
 
+# The paper's observation period. Stage 0 downloads the yearly figures for these
+# years, stage 1 simulates them, and stage 2 turns them into couple-years.
+YEARS = range(2010, 2020)
+
 # Category lists. The first entry of each is the reference category in the model.
 AGE_GROUPS = ["18-25", "26-30", "31-35", "36-45"]
 CONSTELLATIONS = ["dual_equal_earners", "both_jobless", "male_works", "female_works",
@@ -27,7 +31,6 @@ CONSTELLATION_LABELS = {
     "dual_equal_earners": "Dual BW, equal earners", "both_jobless": "Jobless couple",
     "male_works": "Male BW", "female_works": "Female BW",
     "dual_male_main_earner": "Dual BW, male ME", "dual_female_main_earner": "Dual BW, female ME"}
-EDUCATION_LEVELS = ["low", "enrolled", "high", "unknown"]
 HOUSEHOLD_WAGE_TERCILES = ["low", "middle", "high"]
 
 

@@ -15,13 +15,12 @@ two steps:
 import numpy as np
 import pandas as pd
 
-from common import (COUPLE_YEAR_FILE, EVENT_TABLE_FILE, PROCESSED_DATA_FOLDER, REGISTER_FILES,
+from common import (COUPLE_YEAR_FILE, EVENT_TABLE_FILE, PROCESSED_DATA_FOLDER, REGISTER_FILES, YEARS,
                     age_group, constellation, wage_tercile)
 
 # =============================================================================
 # PARAMETERS - sample definition (paper: Denmark 2010-2019, women 18-45)
 # =============================================================================
-OBSERVATION_YEARS = range(2010, 2020)   # calendar years that become couple-years
 MIN_AGE, MAX_AGE = 18, 45               # woman's age (year - birth year)
 YEARS_FROM_EVENT_TO_BIRTH = 1           # the event is a first birth this many years later
 EQUAL_EARNER_SHARE = (0.40, 0.60)       # her wage share counted as "equal earners"
@@ -45,7 +44,7 @@ def build_couple_years():
 
     # ---- who is in the sample ---------------------------------------------------
     # Start from women in the observation years.
-    women = population[(population.sex == "F") & population.year.isin(OBSERVATION_YEARS)].copy()
+    women = population[(population.sex == "F") & population.year.isin(YEARS)].copy()
     # Keep the years in which she has a co-resident partner at year end.
     women = women[women.partner_id > 0]
     # Keep the years in which she is aged 18-45.
@@ -126,7 +125,7 @@ def build_couple_years():
     number_of_couples = len(couple_years[["woman_id", "man_id"]].drop_duplicates())
     print(f"  {COUPLE_YEAR_FILE.name}: {len(couple_years):,} couple-years, "
           f"{number_of_couples:,} couples "
-          f"({len(couple_years) / number_of_couples:.2f} years per couple; paper DK 2.95), "
+          f"({len(couple_years) / number_of_couples:.2f} years per couple), "
           f"{couple_years.conceived_first_child_that_year.sum():,} first births")
     return couple_years
 

@@ -1,6 +1,6 @@
 """
 STAGE 0 - Download every Statistics Denmark figure that stage 1 draws from, and
-save them as three small tables in 0dst_data/, with a chart of each figure as a
+save them as three small tables in 0data/, with a chart of each figure as a
 visual check. Nothing here is simulated: these are published counts and rates.
 The tables are kept in the repository, so this stage only needs to run again
 to refresh them.
@@ -29,10 +29,10 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import FuncFormatter
 
-from common import DST_DATA_FOLDER
+from common import DST_DATA_FOLDER, YEARS
 
-START_YEAR = 2010                       # traits that are drawn once are taken from this year
-YEARS = range(2010, 2020)               # traits that are drawn yearly are taken from each of these
+START_YEAR = min(YEARS)                 # traits that are drawn once are taken from this year;
+                                        # traits that are drawn yearly from each of YEARS
 YOUNGEST_AGE, OLDEST_AGE = 18, 65       # ages covered by the yearly table
 SEX_NAMES = {"K": "F", "2": "F", "M": "M", "1": "M"}     # StatBank's codes -> F / M
 
