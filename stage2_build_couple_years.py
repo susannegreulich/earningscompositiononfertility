@@ -9,7 +9,7 @@ person's situation at the END of the calendar year.
 import numpy as np
 import pandas as pd
 
-from common import COUPLE_YEAR_FILE, REGISTER_FILES, age_group, constellation
+from common import COUPLE_YEAR_FILE, REGISTER_FILES, age_group, constellation, wage_tercile
 
 # =============================================================================
 # PARAMETERS - sample definition (paper: Denmark 2010-2019, women 18-45)
@@ -52,8 +52,7 @@ def build():
     # The event: her first child is born exactly YEARS_FROM_EVENT_TO_BIRTH
     # years later. This is the paper's "conception leading to a first birth",
     # dated to the year before the birth. It is assigned to the couple of that
-    # year, even if the union ends before the birth. After her event year a
-    # woman never appears in the file again.
+    # year. After her event year a woman never appears in the file again.
     women["conceived_first_child_that_year"] = (
         women.first_birth_year == women.year + YEARS_FROM_EVENT_TO_BIRTH).astype(int)
 
@@ -83,14 +82,10 @@ def build():
     women["earner_constellation"] = constellation(
         women.woman_employed, women.man_employed, women.woman_wage, women.man_wage,
         *EQUAL_EARNER_SHARE)
-    # Household wages, and their terciles across ALL couple-years in the file,
-    # pooled over years. Ties are broken by row order, so each tercile holds
-    # exactly one third. (Stage 1 instead uses terciles computed each year
-    # among the couples at risk, which assigns about 2% of couple-years
-    # differently.)
+    # Household wages, and their terciles among the couple-years of the same
+    # calendar year (see common.wage_tercile). Stage 1 uses the same rule.
     women["household_wage"] = women.woman_wage + women.man_wage
-    women["household_wage_tercile"] = pd.qcut(
-        women.household_wage.rank(method="first"), 3, labels=["low", "middle", "high"]).astype(str)
+    women["household_wage_tercile"] = women.groupby("year")["household_wage"].transform(wage_tercile)
     # Her education category; the first matching condition wins:
     # currently enrolled -> "enrolled"; degree missing -> "unknown";
     # ISCED 5 or above -> "high"; otherwise "low".
@@ -103,8 +98,7 @@ def build():
     women["woman_age_group"] = age_group(women.woman_age)
 
     # ---- write the file --------------------------------------------------------------------
-    # A couple is the pair (woman_id, man_id): if she moves in with a new
-    # partner, that is a new couple.
+    # A couple is the pair (woman_id, man_id).
     couple_years = women.rename(columns={"person_id": "woman_id", "partner_id": "man_id"})[[
         "woman_id", "man_id", "year", "woman_age", "woman_age_group",
         "woman_employed", "man_employed", "woman_wage", "man_wage", "earner_constellation",

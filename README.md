@@ -11,108 +11,134 @@ simulates all three data levels, so each one can be inspected and changed.
 ## The logic
 
 ```
+stage 0  download Statistics Denmark figures dst_data/*.csv
+   │
 stage 1  simulate person-level registers    output/1_simulated_register_*.csv
    │
 stage 2  build the couple-year file         output/2_couple_years.csv
    │
 stage 3  collapse to a count table          output/3_event_occurrence_table.csv
    │
-stage 4  fit the paper's models             output/4_*
+stage 4  fit the paper's model              output/4_*
 ```
 
-1. **Simulate registers.** Women born 1965–2002 are followed yearly from age
-   18 to 46. Each year they may leave or enter education, form or end a
-   relationship, find or lose a job, and earn a wage; so may their partners.
-   Childless women with a partner may conceive, with a probability that
-   depends on the couple's employment-wage constellation and other traits.
+0. **Download.** Fetch every Statistics Denmark figure the simulation needs
+   and save it in `dst_data/`: counts of childless women, and rates of
+   employment, enrolment, education, wages and living with a partner. Nothing
+   in this step is simulated.
+1. **Simulate registers.** The population is the women born 1965–2001 who
+   were childless at the start of 2010, counted from Statistics Denmark, plus
+   the partners they live with. They are followed through 2010–2019.
+   - *Drawn once and kept:* birth year, origin, education, and the year she
+     moves in with a partner (if ever).
+   - *Drawn every year:* employed, enrolled and wage, each from that year's
+     Statistics Denmark figure for the person's sex and age, independently of
+     every other trait.
+   - *Generated from the paper's model:* whether a childless woman with a
+     partner conceives that year. The probability comes straight from the
+     paper's logit equation (eq. 1) with the Danish estimates in its Table A2:
+     the couple's employment-wage constellation, her age and education,
+     household wages and foreign origin.
+
    The result is five files imitating the Danish population, employment,
    income, education and birth registers.
 2. **Build couple-years.** Using only those registers, keep each year in which
    a woman aged 18–45 lives with a partner and is still childless. Classify
-   the couple (jobless, male or female breadwinner, or dual earners with
+   the couple (both jobless, only he works, only she works, or both work with
    equal or unequal wages) and record whether a first child was conceived
    that year.
 3. **Collapse.** Count first births and couple-years for every combination of
    the model variables. This is all the paper's authors received.
-4. **Estimate.** Fit the paper's two logit models on the counts and compute
-   the effect of each constellation relative to dual equal earners.
+4. **Estimate.** Fit the paper's logit model on the counts and compare
+   the odds ratios with Table A2.
 
-Each stage reads only the output of the stage before it.
+Each stage reads only the output of the stage before it: stage 1 reads
+`dst_data/`, stage 2 the registers, stage 3 the couple-years, stage 4 the counts.
 
-**Controlling for the income confounding variable:** the birth probabilities that drive stage 1 are known,
-so stage 4 can be checked against the truth. Model 2 (with controls) should
-recover it. Model 1 (age only) should not, because jobless and single-earner
-couples also have lower household wages.
+**Why this is useful:** the odds ratios that generate the births in stage 1
+are known, so stage 4 can be checked against them. If stages 2 to 4 are coded
+correctly, the estimates reproduce Table A2.
+
+Only the paper's Model 2 is recreated: the model with controls for household
+wages, education and foreign origin. The paper also reports a Model 1 without
+those controls, but its estimates depend on how traits are distributed in the
+sample, so they cannot be reproduced without also reproducing the paper's
+sample.
 
 ## Run
 
 ```bash
 pip install -r requirements.txt
-python run_all.py          # all stages, about 30 seconds
+python run_all.py          # all stages, about 25 seconds
 python run_all.py 2 3 4    # only the later stages
+python run_all.py 0        # download the Statistics Denmark figures again
 ```
 
 ## Where things are
 
 | File | Contents |
 |---|---|
-| `stage1_simulate_registers.py` | all behavioural parameters, with their sources, and the simulation |
-| `stage2_build_couple_years.py` | derived variables |
+| `stage0_download_dst_data.py` | downloads the Statistics Denmark figures into `dst_data/`, with a comment naming the table behind each download |
+| `stage1_simulate_registers.py` | the Table A2 odds ratios, the one assumption, and the simulation |
+| `stage2_build_couple_years.py` | who is in the sample, and the derived variables |
 | `stage3_aggregate.py` | the count table and an optional small-cell suppression rule |
-| `stage4_analyse.py` | models, marginal effects, comparison with the paper |
-| `common.py` | file locations, category lists, the constellation rule |
+| `stage4_analyse.py` | the model and the comparison of odds ratios with Table A2 |
+| `common.py` | file locations, category lists, the classification rules |
+| `dst_data/` | the three tables of Statistics Denmark figures that stage 1 draws from |
 
-To change an assumption, edit the constants at the top of the stage file and rerun.
+To change a setting, edit the constants at the top of the stage file and rerun.
+To change a Statistics Denmark figure, edit the table in `dst_data/`.
 
-## Where the parameters come from
+## Where the numbers come from
 
-- **First-birth probabilities:** the paper's Danish Model 2 (Table A2).
-- **Population, education, employment and wage levels:** Statistics Denmark's
-  StatBank (statistikbanken.dk), averaged over 2010–2019, the paper's
-  observation period. StatBank publishes levels (who is employed, enrolled,
-  in a couple) but not yearly transitions, so many transition probabilities
-  are set by hand to reproduce a published level.
-- **Assumptions with no source:** wage dynamics, break-ups of childless
-  couples, and selection into unions by employment. These are chosen so that
-  the couple-year sample has the age mix and the earner constellations of the
-  paper's Table A1.
+- **First births:** the paper's logit equation with the Danish Model 2 odds
+  ratios in Table A2. This is the only part that must match the paper.
+- **Everything else:** Statistics Denmark's StatBank (statistikbanken.dk),
+  downloaded by stage 0 through the public API into three small tables in
+  `dst_data/`.
+
+  | Trait | StatBank table | Year | File in `dst_data/` |
+  |---|---|---|---|
+  | How many childless women, per birth year | BARNLOS, FOLK1E | 2010 | `women_2010.csv` |
+  | Living with a partner, by age | FAM100N | 2010 | `women_2010.csv` |
+  | Born abroad | FOLK1E | 2010 | `immigrant_share_2010.csv` |
+  | Partner's age | FOD11, VIE825 | 2010 | typed into stage 0, with its source |
+  | Education level | HFUDD11 | each year 2010–2019 | `yearly_rates.csv` |
+  | Employed | RAS200 | each year | `yearly_rates.csv` |
+  | Enrolled | UDDAKT10, FOLK1E | each year | `yearly_rates.csv` |
+  | Wage: average | INDKP111 | each year | `yearly_rates.csv` |
+  | Wage: spread | LONS50 | each year from 2013 | `yearly_rates.csv` |
+
+- **One assumption:** how often a person keeps last year's position in the
+  employment, enrolment and wage distributions (80%). Without it, each
+  person's status would jump at random from year to year. It does not change
+  the share employed, enrolled or at a given wage in any year.
+
+The simulated sample does not have to look like the paper's sample (its Table
+A1). The model contains every trait the births depend on, so it recovers Table
+A2 whatever the mix of ages, constellations or education levels is.
 
 ## Results with the default parameters
 
-- **The couple-year sample is close to the paper's** on the two things that
-  matter most for the models:
+- **The estimates reproduce Table A2.** The paper's Danish odds ratio lies inside
+  the 95% confidence interval for all 15 estimates. For the constellations,
+  relative to dual equal earners:
 
-  | Share of couple-years | Simulated | Paper |
+  | Constellation | Estimated | Table A2 |
   |---|---|---|
-  | Women 18–25 / 26–30 / 31–35 / 36–45 | 36 / 30 / 16 / 18% | 37 / 31 / 15 / 18% |
-  | Dual equal earners | 27% | 29% |
-  | Dual, male / female main earner | 25 / 8% | 24 / 10% |
-  | Male / female breadwinner | 20 / 12% | 17 / 11% |
-  | Jobless | 8% | 9% |
+  | Both jobless | 0.75 | 0.76 |
+  | Only he works | 0.91 | 0.89 |
+  | Only she works | 0.86 | 0.83 |
+  | Both work, he earns more | 0.80 | 0.79 |
+  | Both work, she earns more | 1.05 | 1.02 |
 
-- **Model 2 recovers the truth** within its 95% confidence interval for four
-  of the five constellations. Female breadwinner is outside (−0.011 against a
-  true −0.017).
-- **Model 1 is close to the paper's Danish estimates** for the jobless (−0.088
-  against −0.096) and the single-earner couples, less so for male main earners
-  (−0.030 against −0.043), and not for female main earners (+0.009 against
-  −0.034).
-- **Two known mismatches.** Far more women are enrolled than in the paper (29%
-  against 1.3%), which suggests the paper defines "enrolled" more narrowly
-  than StatBank. And the simulation has too few mothers, so the share of all
-  women living in a couple is too low after age 30.
-
-  there are two, and both come from the paper. They are the same kind of model, a logit for whether a childless couple conceives a first child in a given year, and differ only in what they control for:
-
-Model 1 uses the woman's age group and the couple's earner constellation.
-Model 2 uses those two plus the household-wage tercile, the woman's education, and whether either partner is foreign-born.
-Both are fitted in stage4_analyse.py on the stage 3 count table, and both report the effect of each constellation relative to dual equal earners.
-
-The reason for having two is to separate a gross association from a net one. Take jobless couples: in Model 1 they are about 9 percentage points less likely to conceive than equal earners; in Model 2 only about 2. Most of the Model 1 gap arises because jobless couples also have low household wages, and low wages themselves go with fewer births. Once Model 2 holds wages, education and origin fixed, what remains is the part tied to the constellation itself.
-
-In this project the comparison has an extra use. The birth probabilities in stage 1 are built from the constellation plus exactly the Model 2 controls, so Model 2 is the correctly specified model and should reproduce the values you put in. That is the check that stages 2 to 4 are coded correctly. Model 1 leaves those controls out, so it should differ from the truth, and the size of that difference shows how much of the raw pattern is composition.
+- **Size.** With the default 20% of Denmark's childless women: 152,000 women,
+  78,000 partners, 367,000 couple-years and 39,000 first births.
 
 ## Limits
 
-- All parameters are constant over time: no business cycle, no postponement.
-- First births only; no migration or mortality; men exist only while partnered.
+- A person's traits are independent of each other: employment does not depend
+  on education, and partners' wages are unrelated.
+- Couples never break up, and a woman has at most one partner.
+- Nobody enters after 2010: women who immigrate later are not added.
+- First births only; no mortality; men exist only once they live with a simulated woman.

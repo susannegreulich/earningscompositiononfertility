@@ -1,12 +1,14 @@
 """Definitions shared by all stages: file locations, category labels, and the
-two classification rules (age group, earner constellation)."""
+three classification rules (age group, wage tercile, earner constellation)."""
 from pathlib import Path
 
 import numpy as np
 
-# Every stage writes into one folder; the number at the start of a file name
+# Stages 1 to 4 write into one folder; the number at the start of a file name
 # is the stage that wrote it.
 OUTPUT_FOLDER = Path(__file__).parent / "output"
+# Figures downloaded from Statistics Denmark by stage0_download_dst_data.py.
+DST_DATA_FOLDER = Path(__file__).parent / "dst_data"
 # The five simulated registers, named after the Danish registers they imitate:
 # bef = population, ras = employment, ind = income, udda = education, fod = births.
 REGISTER_FILES = {name: OUTPUT_FOLDER / f"1_simulated_register_{name}.csv"
@@ -14,7 +16,7 @@ REGISTER_FILES = {name: OUTPUT_FOLDER / f"1_simulated_register_{name}.csv"
 COUPLE_YEAR_FILE = OUTPUT_FOLDER / "2_couple_years.csv"
 EVENT_TABLE_FILE = OUTPUT_FOLDER / "3_event_occurrence_table.csv"
 
-# Category lists. The first entry of each is the reference category in the models.
+# Category lists. The first entry of each is the reference category in the model.
 AGE_GROUPS = ["18-25", "26-30", "31-35", "36-45"]
 CONSTELLATIONS = ["dual_equal_earners", "both_jobless", "male_works", "female_works",
                   "dual_male_main_earner", "dual_female_main_earner"]
@@ -32,6 +34,14 @@ def age_group(woman_age):
     woman_age = np.asarray(woman_age)
     return np.select([woman_age <= 25, woman_age <= 30, woman_age <= 35],
                      AGE_GROUPS[:3], AGE_GROUPS[3])
+
+
+def wage_tercile(household_wage):
+    """Low, middle or high third of the household wages passed in. Stages 1 and 2
+    both apply this to the couples at risk in one calendar year, so that wage
+    growth over the years does not move couples between thirds."""
+    lower_limit, upper_limit = np.quantile(household_wage, [1 / 3, 2 / 3])
+    return np.array(HOUSEHOLD_WAGE_TERCILES)[np.digitize(household_wage, [lower_limit, upper_limit])]
 
 
 def constellation(woman_employed, man_employed, woman_wage, man_wage,
