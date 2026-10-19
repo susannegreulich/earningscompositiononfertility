@@ -3,7 +3,7 @@ STAGE 3 - Estimate the paper's logit model (Model 2) on the event-occurrence
 table and compare the odds ratios with the Danish odds ratios of the paper's
 Table A2, as a table and as a chart. A second chart shows the odds themselves
 for each constellation, written as fractions ("1 to 13"). Uses ONLY the stage 2
-event-occurrence table, plus the Danish Table A2 values from stage 0, which stage 1
+event-occurrence table, plus the Danish Table A2 values in 0data/, which stage 1
 generated the births from.
 
 The model is the equation the births were generated from, so its odds ratios
@@ -17,15 +17,15 @@ import pandas as pd
 import statsmodels.api as sm
 from patsy import dmatrix
 
-from common import CONSTELLATION_LABELS, CONSTELLATIONS, ESTIMATION_FOLDER, EVENT_TABLE_FILE
-from stage0_data import DANISH_BASELINE_ODDS, DANISH_ODDS_RATIOS
+from common import (CONSTELLATION_LABELS, CONSTELLATIONS, DANISH_BASELINE_ODDS, DANISH_ODDS_RATIOS,
+                    ESTIMATION_FOLDER, EVENT_TABLE_FILE)
 
 # The paper's Model 2 (eq. 1 plus controls): the woman's age group, the
 # couple's constellation, household-wage tercile, her education and foreign
 # origin.
 MODEL_FORMULA = ("woman_age_group + earner_constellation + household_wage_tercile"
                  " + woman_education + either_partner_foreign")
-# Category order of each variable, as in stage 0's table of the paper's odds
+# Category order of each variable, as in the table of the paper's odds
 # ratios; the first category is the reference. Foreign origin is a 0/1 number
 # and needs no order.
 CATEGORY_ORDER = {variable: list(odds_ratios) for variable, odds_ratios in DANISH_ODDS_RATIOS.items()

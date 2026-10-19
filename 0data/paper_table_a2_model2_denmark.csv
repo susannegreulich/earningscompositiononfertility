@@ -1,21 +1,21 @@
-variable,category,label_in_paper,compared_with,danish_odds_ratio,yearly_probability_for_reference_couple
-baseline,,Constant x Denmark,(not a ratio: the odds of the Danish reference couple),0.0773,0.0717
-woman_age_group,18-25,Age female partner 18-25 (reference),Age female partner 18-25,1.0,0.0717
-woman_age_group,26-30,Age female partner 26-30,Age female partner 18-25,1.324,0.0928
-woman_age_group,31-35,Age female partner 31-35,Age female partner 18-25,1.219,0.0861
-woman_age_group,36-45,Age female partner 36-45,Age female partner 18-25,0.281,0.0213
-earner_constellation,dual_equal_earners,"Dual breadwinner, equal earners (reference)","Dual breadwinner, equal earners",1.0,0.0717
-earner_constellation,both_jobless,Jobless couple,"Dual breadwinner, equal earners",0.758,0.0554
-earner_constellation,male_works,Male breadwinner,"Dual breadwinner, equal earners",0.89,0.0644
-earner_constellation,female_works,Female breadwinner,"Dual breadwinner, equal earners",0.832,0.0604
-earner_constellation,dual_male_main_earner,"Dual breadwinner, male main earner","Dual breadwinner, equal earners",0.794,0.0578
-earner_constellation,dual_female_main_earner,"Dual breadwinner, female main earner","Dual breadwinner, equal earners",1.02,0.073
-household_wage_tercile,low,Household wages low (reference),Household wages low,1.0,0.0717
-household_wage_tercile,middle,Household wages middle,Household wages low,1.723,0.1175
-household_wage_tercile,high,Household wages high,Household wages low,2.534,0.1638
-woman_education,low,Education female partner low (reference),Education female partner low,1.0,0.0717
-woman_education,enrolled,Enrolled in education,Education female partner low,0.797,0.058
-woman_education,high,Education female partner high,Education female partner low,1.366,0.0955
-woman_education,unknown,Education female partner unknown,Education female partner low,0.998,0.0716
-either_partner_foreign,0,Neither partner born abroad (reference),Neither partner born abroad,1.0,0.0717
-either_partner_foreign,1,Foreign country of birth (either partner),Neither partner born abroad,0.848,0.0615
+variable,category,danish_odds_ratio
+baseline,,0.0773
+woman_age_group,18-25,1.0
+woman_age_group,26-30,1.324
+woman_age_group,31-35,1.219
+woman_age_group,36-45,0.281
+earner_constellation,dual_equal_earners,1.0
+earner_constellation,both_jobless,0.758
+earner_constellation,male_works,0.89
+earner_constellation,female_works,0.832
+earner_constellation,dual_male_main_earner,0.794
+earner_constellation,dual_female_main_earner,1.02
+household_wage_tercile,low,1.0
+household_wage_tercile,middle,1.723
+household_wage_tercile,high,2.534
+woman_education,low,1.0
+woman_education,enrolled,0.797
+woman_education,high,1.366
+woman_education,unknown,0.998
+either_partner_foreign,0,1.0
+either_partner_foreign,1,0.848

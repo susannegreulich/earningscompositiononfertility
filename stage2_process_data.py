@@ -15,24 +15,13 @@ two steps:
 import numpy as np
 import pandas as pd
 
-from common import (COUPLE_YEAR_FILE, EVENT_TABLE_FILE, PROCESSED_DATA_FOLDER, REGISTER_FILES, YEARS,
-                    age_group, constellation, wage_tercile)
+from common import (COUPLE_YEAR_FILE, EVENT_TABLE_FILE, MAX_AGE_AT_RISK, MIN_AGE_AT_RISK,
+                    PROCESSED_DATA_FOLDER, REGISTER_FILES, YEARS, age_group, constellation,
+                    wage_tercile)
 
-# =============================================================================
-# PARAMETERS - sample definition (paper: Denmark 2010-2019, women 18-45)
-# =============================================================================
-MIN_AGE, MAX_AGE = 18, 45               # woman's age (year - birth year)
-YEARS_FROM_EVENT_TO_BIRTH = 1           # the event is a first birth this many years later
-EQUAL_EARNER_SHARE = (0.40, 0.60)       # her wage share counted as "equal earners"
-
-# ---- the event-occurrence table ---------------------------------------------------
-# The model variables that define a cell of the table.
+# The model variables that define a cell of the event-occurrence table.
 CELL_VARIABLES = ["woman_age_group", "earner_constellation", "household_wage_tercile",
                   "woman_education", "either_partner_foreign"]
-# Statistical-office disclosure rule: cells with fewer couple-years are dropped
-# (0 = keep everything). Dropping cells changes the estimates - try it.
-MIN_COUPLE_YEARS_PER_CELL = 0
-# =============================================================================
 
 
 def build_couple_years():
@@ -49,7 +38,7 @@ def build_couple_years():
     women = women[women.partner_id > 0]
     # Keep the years in which she is aged 18-45.
     women["woman_age"] = women.year - women.birth_year
-    women = women[women.woman_age.between(MIN_AGE, MAX_AGE)]
+    women = women[women.woman_age.between(MIN_AGE_AT_RISK, MAX_AGE_AT_RISK)]
 
     # ---- childlessness and the event ----------------------------------------------
     # The year of her first birth: her earliest birth date in the birth
@@ -59,16 +48,13 @@ def build_couple_years():
                         .rename("first_birth_year"))
     women = women.join(first_birth_year, on="person_id")
     # Keep a year only if she is still at risk: no first birth, or a first
-    # birth no earlier than `year + YEARS_FROM_EVENT_TO_BIRTH`. With the
-    # default of 1: childless through the end of the year.
-    birth_year_of_event = women.year + YEARS_FROM_EVENT_TO_BIRTH
-    women = women[women.first_birth_year.isna() | (women.first_birth_year >= birth_year_of_event)]
-    # The event: her first child is born exactly YEARS_FROM_EVENT_TO_BIRTH
-    # years later. This is the paper's "conception leading to a first birth",
-    # dated to the year before the birth. It is assigned to the couple of that
-    # year. After her event year a woman never appears in the file again.
-    women["conceived_first_child_that_year"] = (
-        women.first_birth_year == women.year + YEARS_FROM_EVENT_TO_BIRTH).astype(int)
+    # birth in a later year, so she is childless through the end of the year.
+    women = women[women.first_birth_year.isna() | (women.first_birth_year > women.year)]
+    # The event: her first child is born the next year. This is the paper's
+    # "conception leading to a first birth", dated to the year before the
+    # birth. It is assigned to the couple of that year. After her event year a
+    # woman never appears in the file again.
+    women["conceived_first_child_that_year"] = (women.first_birth_year == women.year + 1).astype(int)
 
     # ---- attaching characteristics --------------------------------------------------
     person_year = ["person_id", "year"]
@@ -94,8 +80,7 @@ def build_couple_years():
     # Employment-wage constellation: who works and, if both do, how wages are
     # split (see common.constellation).
     women["earner_constellation"] = constellation(
-        women.woman_employed, women.man_employed, women.woman_wage, women.man_wage,
-        *EQUAL_EARNER_SHARE)
+        women.woman_employed, women.man_employed, women.woman_wage, women.man_wage)
     # Household wages, and their terciles among the couple-years of the same
     # calendar year (see common.wage_tercile). Stage 1 uses the same rule.
     women["household_wage"] = women.woman_wage + women.man_wage
@@ -141,16 +126,8 @@ def count_events(couple_years):
     # individual couple-years.
     cells = (couple_years.groupby(CELL_VARIABLES)["conceived_first_child_that_year"]
              .agg(first_births="sum", couple_years="size").reset_index())
-
-    # Disclosure control: drop cells with too few couple-years.
-    too_small = cells.couple_years < MIN_COUPLE_YEARS_PER_CELL
-    suppressed_cells = cells[too_small]
-    cells = cells[~too_small]
-
     cells.to_csv(EVENT_TABLE_FILE, index=False)
-    print(f"  {EVENT_TABLE_FILE.name}: {len(cells)} cells "
-          f"(of max 576; {len(suppressed_cells)} suppressed, "
-          f"{suppressed_cells.couple_years.sum():,} couple-years lost)")
+    print(f"  {EVENT_TABLE_FILE.name}: {len(cells)} cells (of max 576)")
     return cells
 
 
